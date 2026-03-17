@@ -1,12 +1,12 @@
 {
   "scripts": [
     {
-      "label": "运行成功脚本",
-      "script": "mock_success.py"
+      "label": "空白处新建 README.md",
+      "script": "new_readme.py"
     },
     {
-      "label": "运行失败脚本",
-      "script": "mock_error.py"
+      "label": "读取文本内容到岛",
+      "script": "cat_readme.py"
     },
     {
       "label": "图片加水印",

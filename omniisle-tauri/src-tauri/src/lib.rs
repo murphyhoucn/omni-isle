@@ -951,9 +951,13 @@ fn apply_context_menu(enabled: bool) -> Result<(), String> {
   let hkcu = RegKey::predef(HKEY_CURRENT_USER);
   let file_root = "Software\\Classes\\*\\shell\\OmniIsle";
   let dir_root = "Software\\Classes\\Directory\\shell\\OmniIsle";
+  let dir_bg_root = "Software\\Classes\\Directory\\Background\\shell\\OmniIsle";
+  let desktop_bg_root = "Software\\Classes\\DesktopBackground\\Shell\\OmniIsle";
 
   let _ = hkcu.delete_subkey_all(file_root);
   let _ = hkcu.delete_subkey_all(dir_root);
+  let _ = hkcu.delete_subkey_all(dir_bg_root);
+  let _ = hkcu.delete_subkey_all(desktop_bg_root);
 
   if !enabled {
     return Ok(());
@@ -967,6 +971,8 @@ fn apply_context_menu(enabled: bool) -> Result<(), String> {
 
   create_context_menu_root(&hkcu, file_root, "%1", &exe, &scripts)?;
   create_context_menu_root(&hkcu, dir_root, "%1", &exe, &scripts)?;
+  create_context_menu_root(&hkcu, dir_bg_root, "%V", &exe, &scripts)?;
+  create_context_menu_root(&hkcu, desktop_bg_root, "%V", &exe, &scripts)?;
 
   Ok(())
 }
@@ -1495,10 +1501,30 @@ fn parse_startup_job_from_list(args: &[String]) -> Option<StartupJob> {
 
   let mut script: Option<String> = None;
   let mut target_path: Option<String> = None;
-  let mut i = 1usize;
+  // The list may or may not include argv[0] depending on caller (std::env::args vs plugin callback).
+  // Scan from index 0 to support both shapes.
+  let mut i = 0usize;
 
   while i < args.len() {
-    match args[i].as_str() {
+    let current = args[i].as_str();
+    if let Some(value) = current.strip_prefix("--run-script=") {
+      let cleaned = value.trim().trim_matches('"');
+      if !cleaned.is_empty() {
+        script = Some(cleaned.to_string());
+      }
+      i += 1;
+      continue;
+    }
+    if let Some(value) = current.strip_prefix("--target=") {
+      let cleaned = value.trim().trim_matches('"');
+      if !cleaned.is_empty() {
+        target_path = Some(cleaned.to_string());
+      }
+      i += 1;
+      continue;
+    }
+
+    match current {
       "--run-script" if i + 1 < args.len() => {
         script = Some(args[i + 1].clone());
         i += 2;
@@ -1511,6 +1537,24 @@ fn parse_startup_job_from_list(args: &[String]) -> Option<StartupJob> {
         i += 1;
       }
     }
+  }
+
+  if script.is_none() {
+    let raw = args.join(" ");
+    script = extract_flag_value(&raw, "--run-script");
+    if target_path.is_none() {
+      target_path = extract_flag_value(&raw, "--target");
+    }
+  }
+
+  if script.is_none() {
+    write_log(
+      "INFO",
+      &format!(
+        "startup job parse skipped (no --run-script found). args={}",
+        args.join(" | ")
+      ),
+    );
   }
 
   let job = script.map(|s| StartupJob {
@@ -1536,6 +1580,52 @@ fn parse_startup_job_from_list(args: &[String]) -> Option<StartupJob> {
   job
 }
 
+fn extract_flag_value(input: &str, flag: &str) -> Option<String> {
+  let mut start = input.find(flag)? + flag.len();
+  let bytes = input.as_bytes();
+
+  while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+    start += 1;
+  }
+
+  if start < bytes.len() && bytes[start] == b'=' {
+    start += 1;
+  }
+
+  while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+    start += 1;
+  }
+
+  if start >= bytes.len() {
+    return None;
+  }
+
+  if bytes[start] == b'"' {
+    let value_start = start + 1;
+    let mut end = value_start;
+    while end < bytes.len() && bytes[end] != b'"' {
+      end += 1;
+    }
+    let value = input[value_start..end].trim();
+    if value.is_empty() {
+      None
+    } else {
+      Some(value.to_string())
+    }
+  } else {
+    let mut end = start;
+    while end < bytes.len() && !bytes[end].is_ascii_whitespace() {
+      end += 1;
+    }
+    let value = input[start..end].trim();
+    if value.is_empty() {
+      None
+    } else {
+      Some(value.to_string())
+    }
+  }
+}
+
 fn forward_startup_job(app: &tauri::AppHandle, startup_job: Option<StartupJob>) {
   if let Some(job) = startup_job {
     if let Some(state) = app.try_state::<AppState>() {
@@ -1559,12 +1649,17 @@ pub fn run() {
     })
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if cfg!(debug_assertions) {
+          write_log("INFO", "main window close requested in debug; allowing app exit");
+          return;
+        }
         api.prevent_close();
         let _ = window.hide();
         write_log("INFO", "main window close requested; hidden to tray");
       }
     })
     .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+      write_log("INFO", &format!("single-instance callback argv={}", argv.join(" | ")));
       let startup_job = parse_startup_job_from_list(&argv);
       forward_startup_job(app, startup_job);
       show_main_window(app);
