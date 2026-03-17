@@ -60,7 +60,7 @@ fn resolve_script_path(script_name: &str) -> Result<PathBuf, String> {
   let candidate_roots = vec![cwd.clone(), cwd.join(".."), cwd.join("..").join("..")];
 
   for root in candidate_roots {
-    let candidate = root.join("demo").join("scripts").join(script_name);
+    let candidate = root.join("configs").join("scripts").join(script_name);
     if candidate.exists() {
       return Ok(candidate);
     }
@@ -74,13 +74,13 @@ fn resolve_script_config_path() -> Result<PathBuf, String> {
   let candidate_roots = vec![cwd.clone(), cwd.join(".."), cwd.join("..").join("..")];
 
   for root in candidate_roots {
-    let candidate = root.join("demo").join("scripts_config.json");
+    let candidate = root.join("configs").join("scripts_config.json");
     if candidate.exists() {
       return Ok(candidate);
     }
   }
 
-  Err("未找到脚本配置文件 demo/scripts_config.json".to_string())
+  Err("未找到脚本配置文件 configs/scripts_config.json".to_string())
 }
 
 fn choose_python_executable() -> String {
@@ -204,7 +204,7 @@ fn get_script_catalog() -> Result<Vec<ScriptMenuItem>, String> {
   }
 
   if items.is_empty() {
-    return Err("脚本配置为空，请在 demo/scripts_config.json 中添加 scripts 项".to_string());
+    return Err("脚本配置为空，请在 configs/scripts_config.json 中添加 scripts 项".to_string());
   }
 
   Ok(items)

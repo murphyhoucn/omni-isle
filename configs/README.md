@@ -1,26 +1,26 @@
 # OmniIsle Demo
 
-这个 demo 只验证交互与执行链路，不包含任何注册表写入或右键菜单接入。
+这个 configs 只验证交互与执行链路，不包含任何注册表写入或右键菜单接入。
 
 ## 运行方式
 
 在项目根目录执行：
 
 ```powershell
-python demo/omniisle_demo.py
+python configs/omniisle_demo.py
 ```
 
 ## 配置脚本按钮
 
-脚本按钮来自配置文件 `demo/scripts_config.json`：
+脚本按钮来自配置文件 `configs/scripts_config.json`：
 
 - `label`：按钮显示名
-- `script`：脚本文件名（位于 `demo/scripts/` 下）
+- `script`：脚本文件名（位于 `configs/scripts/` 下）
 
 你新增脚本时，只需要：
 
-1. 把脚本文件放到 `demo/scripts/`
-2. 在 `demo/scripts_config.json` 中添加一项
+1. 把脚本文件放到 `configs/scripts/`
+2. 在 `configs/scripts_config.json` 中添加一项
 
 ## 你可以验证什么
 

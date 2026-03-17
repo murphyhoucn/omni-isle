@@ -10,6 +10,7 @@ const COLLAPSED_WIDTH = 420
 const APP_VERSION = '0.1.0-demo'
 const APP_AUTHOR = 'OmniIsle Team'
 const GITHUB_REPO_URL = 'https://github.com/'
+const DEBUG_BODY_BOUNDS = true
 
 type ViewMode = 'island' | 'settings'
 type RunState = 'ready' | 'queued' | 'running' | 'success' | 'error'
@@ -58,6 +59,12 @@ type QueueJob = {
   targetPath?: string
 }
 
+type EnvConfigItem = {
+  id: number
+  name: string
+  value: string
+}
+
 const nowStamp = () =>
   new Date().toLocaleTimeString('zh-CN', {
     hour12: false,
@@ -67,6 +74,16 @@ const nowStamp = () =>
   })
 
 function App() {
+  const envNameOptions = ['PYTHON', 'NODE', 'RUST', 'GCC', 'JAVA', 'CUSTOM']
+  const envLookupPresets: Record<string, string> = {
+    PYTHON: 'python',
+    NODE: 'node',
+    RUST: 'rustc',
+    GCC: 'gcc',
+    JAVA: 'java',
+    CUSTOM: '',
+  }
+
   const [viewMode, setViewMode] = useState<ViewMode>('island')
   const [wide, setWide] = useState(false)
   const [showPanel, setShowPanel] = useState(false)
@@ -81,10 +98,17 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [queue, setQueue] = useState<QueueJob[]>([])
   const [activeJob, setActiveJob] = useState<QueueJob | null>(null)
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false)
+  const [contextMenuEnabled, setContextMenuEnabled] = useState(false)
+  const [envConfigs, setEnvConfigs] = useState<EnvConfigItem[]>([
+    { id: 1, name: 'PYTHON', value: 'python' },
+    { id: 2, name: 'NODE', value: 'node' },
+  ])
 
   const panelRef = useRef<HTMLDivElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
   const logIdRef = useRef(2)
+  const envRowIdRef = useRef(3)
   const openTimer = useRef<number | null>(null)
   const closeTimer = useRef<number | null>(null)
 
@@ -146,6 +170,20 @@ function App() {
       }
     }
   }, [showPanel, wide, viewMode])
+
+  useEffect(() => {
+    if (!DEBUG_BODY_BOUNDS) {
+      return
+    }
+
+    document.documentElement.classList.add('debug-body-bounds')
+    document.body.classList.add('debug-body-bounds')
+
+    return () => {
+      document.documentElement.classList.remove('debug-body-bounds')
+      document.body.classList.remove('debug-body-bounds')
+    }
+  }, [])
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -307,6 +345,52 @@ function App() {
     }
   }
 
+  const queueScriptRun = (item: ScriptMenuItem) => {
+    const nextJob: QueueJob = {
+      label: item.label,
+      script: item.script,
+    }
+
+    setQueue((prev) => [...prev, nextJob])
+    setRunState((prev) => (prev === 'running' ? prev : 'queued'))
+    pushLog('queue', `设置页测试运行入队: ${item.label} (${item.script})`)
+    setViewMode('island')
+    openIsland()
+  }
+
+  const onEditScript = (item: ScriptMenuItem) => {
+    pushLog('warn', `编辑脚本待实现: ${item.label} (${item.script})`)
+  }
+
+  const onDeleteScript = (item: ScriptMenuItem) => {
+    setScriptItems((prev) => prev.filter((script) => script.script !== item.script))
+    pushLog('info', `已从列表移除脚本: ${item.label} (${item.script})`)
+  }
+
+  const addEnvConfigRow = () => {
+    const id = envRowIdRef.current
+    envRowIdRef.current += 1
+    setEnvConfigs((prev) => [...prev, { id, name: 'CUSTOM', value: '' }])
+  }
+
+  const updateEnvConfigRow = (id: number, patch: Partial<EnvConfigItem>) => {
+    setEnvConfigs((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  }
+
+  const removeEnvConfigRow = (id: number) => {
+    setEnvConfigs((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  const resolveEnvConfigRow = (row: EnvConfigItem) => {
+    const nextValue = envLookupPresets[row.name] ?? ''
+    if (!nextValue) {
+      pushLog('warn', `未提供 ${row.name} 的默认检索结果，请手动填写`)
+      return
+    }
+    updateEnvConfigRow(row.id, { value: nextValue })
+    pushLog('info', `已检索 ${row.name} 运行环境: ${nextValue}`)
+  }
+
   useEffect(() => {
     if (busy || activeJob || queue.length === 0) {
       return
@@ -396,14 +480,102 @@ function App() {
                       </header>
 
                       <section className="settings-card panel-settings-card">
-                        <h2>开机自启动</h2>
-                        {/* <p>启动系统后自动拉起 OmniIsle。</p> */}
-                        <div className="setting-row">
-                          <button type="button" className="switch-btn" aria-pressed="false">
-                            <span className="switch-thumb" />
-                          </button>
-                          <span className="setting-tip">预览态，后续接入系统权限与真实开关</span>
+                        <h2>系统集成</h2>
+                        <div className="setting-toggle-grid">
+                          <div className="setting-toggle-item">
+                            <span className="setting-tip">开机自启动</span>
+                            <button
+                              type="button"
+                              className="switch-btn"
+                              aria-pressed={autoStartEnabled}
+                              onClick={() => {
+                                const next = !autoStartEnabled
+                                setAutoStartEnabled(next)
+                                pushLog('info', `开机自启动: ${next ? '开启' : '关闭'}（预览态）`)
+                              }}
+                            >
+                              <span className="switch-thumb" />
+                            </button>
+                          </div>
+                          <div className="setting-toggle-item">
+                            <span className="setting-tip">加入右键菜单栏</span>
+                            <button
+                              type="button"
+                              className="switch-btn"
+                              aria-pressed={contextMenuEnabled}
+                              onClick={() => {
+                                const next = !contextMenuEnabled
+                                setContextMenuEnabled(next)
+                                pushLog('info', `右键菜单栏: ${next ? '开启' : '关闭'}（预览态）`)
+                              }}
+                            >
+                              <span className="switch-thumb" />
+                            </button>
+                          </div>
                         </div>
+                      </section>
+
+                      <section className="settings-card panel-settings-card">
+                        <h2>运行环境变量</h2>
+                        <p>每行一个运行环境，可新增更多环境并在系统中检索默认命令。</p>
+                        <div className="env-config-list">
+                          {envConfigs.map((row) => (
+                            <div key={`env-${row.id}`} className="env-config-row">
+                              <select
+                                className="env-name-select"
+                                value={row.name}
+                                onChange={(event) => {
+                                  const nextName = event.target.value
+                                  const nextValue = envLookupPresets[nextName] ?? row.value
+                                  updateEnvConfigRow(row.id, { name: nextName, value: nextValue })
+                                }}
+                              >
+                                {envNameOptions.map((option) => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                              <input
+                                className="env-value-input"
+                                type="text"
+                                value={row.value}
+                                placeholder="在系统中检索到的可执行命令/路径"
+                                onChange={(event) => updateEnvConfigRow(row.id, { value: event.target.value })}
+                              />
+                              <button
+                                type="button"
+                                className="env-action-btn"
+                                aria-label="系统检索"
+                                title="系统检索"
+                                onClick={() => resolveEnvConfigRow(row)}
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path
+                                    fill="currentColor"
+                                    d="M10.5 3a7.5 7.5 0 1 0 4.86 13.22l4.2 4.2a1 1 0 0 0 1.42-1.42l-4.2-4.2A7.5 7.5 0 0 0 10.5 3Zm0 2a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                className="env-action-btn env-action-btn-danger"
+                                aria-label="删除环境配置"
+                                title="删除"
+                                onClick={() => removeEnvConfigRow(row.id)}
+                                disabled={envConfigs.length <= 1}
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path
+                                    fill="currentColor"
+                                    d="M9 3a1 1 0 0 0-1 1v1H5a1 1 0 1 0 0 2h1l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12h1a1 1 0 1 0 0-2h-3V4a1 1 0 0 0-1-1H9Zm2 2h2v1h-2V5Zm-2 4a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1Zm6 0a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1Z"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" className="ghost-btn" onClick={addEnvConfigRow}>
+                          + 增加运行环境
+                        </button>
                       </section>
 
                       <section className="settings-card panel-settings-card">
@@ -417,7 +589,12 @@ function App() {
                                 <span className="script-file">{item.script}</span>
                               </div>
                               <div className="script-actions">
-                                <button type="button" className="script-icon-btn" disabled aria-label="编辑脚本">
+                                <button type="button" className="script-icon-btn" onClick={() => queueScriptRun(item)} aria-label="运行脚本" title="运行">
+                                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path fill="currentColor" d="M8 5v14l11-7-11-7Z" />
+                                  </svg>
+                                </button>
+                                <button type="button" className="script-icon-btn" onClick={() => onEditScript(item)} aria-label="编辑脚本" title="编辑">
                                   <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path
                                       fill="currentColor"
@@ -425,11 +602,11 @@ function App() {
                                     />
                                   </svg>
                                 </button>
-                                <button type="button" className="script-icon-btn" disabled aria-label="删除脚本">
+                                <button type="button" className="script-icon-btn script-icon-btn-danger" onClick={() => onDeleteScript(item)} aria-label="删除脚本" title="删除">
                                   <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path
                                       fill="currentColor"
-                                      d="M6 7h12l-1 14H7L6 7Zm3-3h6l1 2h4v2H4V6h4l1-2Z"
+                                      d="M9 3a1 1 0 0 0-1 1v1H5a1 1 0 1 0 0 2h1l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12h1a1 1 0 1 0 0-2h-3V4a1 1 0 0 0-1-1H9Zm2 2h2v1h-2V5Zm-2 4a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1Zm6 0a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1Z"
                                     />
                                   </svg>
                                 </button>
@@ -528,6 +705,7 @@ function App() {
           </AnimatePresence>
         </motion.div>
       </motion.section>
+
     </main>
   )
 }
