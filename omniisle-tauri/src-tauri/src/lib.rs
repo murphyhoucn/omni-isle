@@ -1213,6 +1213,51 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_configs_folder() -> Result<String, String> {
+  let configs_dir = resolve_configs_dir()?;
+
+  #[cfg(target_os = "windows")]
+  {
+    Command::new("explorer")
+      .arg(&configs_dir)
+      .spawn()
+      .map_err(|e| format!("打开 configs 文件夹失败: {e}"))?;
+
+    let path = configs_dir.to_string_lossy().to_string();
+    write_log("INFO", &format!("configs folder opened: {path}"));
+    return Ok(path);
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    Err("当前平台暂不支持打开 configs 文件夹".to_string())
+  }
+}
+
+#[tauri::command]
+fn open_logs_folder() -> Result<String, String> {
+  let logs_dir = resolve_logs_dir()
+    .ok_or_else(|| "无法解析 logs 文件夹路径".to_string())?;
+
+  #[cfg(target_os = "windows")]
+  {
+    Command::new("explorer")
+      .arg(&logs_dir)
+      .spawn()
+      .map_err(|e| format!("打开 logs 文件夹失败: {e}"))?;
+
+    let path = logs_dir.to_string_lossy().to_string();
+    write_log("INFO", &format!("logs folder opened: {path}"));
+    return Ok(path);
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    Err("当前平台暂不支持打开 logs 文件夹".to_string())
+  }
+}
+
+#[tauri::command]
 fn write_app_log(level: String, message: String) {
   let level = match level.to_uppercase().as_str() {
     "INFO" | "WARN" | "ERROR" | "RUN" => level.to_uppercase(),
@@ -1538,6 +1583,8 @@ pub fn run() {
       set_idle_hide_seconds,
       pick_environment_executable,
       open_url,
+      open_configs_folder,
+      open_logs_folder,
       write_app_log,
       take_startup_job,
       sync_main_window_size

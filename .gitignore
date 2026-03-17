@@ -18,6 +18,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+*.exe
+task_*.*
+
 # Node / frontend
 node_modules/
 dist/
@@ -29,3 +32,4 @@ target/
 # Project-specific nested caches
 omniisle-tauri/.npm-cache/
 omniisle-tauri/src-tauri/.npm-cache/
+

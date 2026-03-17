@@ -447,9 +447,16 @@ div.log-box::-webkit-scrollbar-corner {
 
 .settings-top {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
+}
+
+.settings-top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .settings-top h1 {

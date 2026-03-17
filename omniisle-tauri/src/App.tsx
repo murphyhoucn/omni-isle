@@ -15,6 +15,8 @@ const DEBUG_BODY_BOUNDS = false // 调试用，是否显示主窗口边界框
 const POST_RUN_HIDE_SECONDS = 5 // 任务完成后自动隐藏的短暂延迟（秒）
 
 const IDLE_HIDE_OPTIONS = [
+  { value: 5, label: '5 秒' },
+  { value: 10, label: '10 秒' },
   { value: 30, label: '30 秒' },
   { value: 60, label: '60 秒' },
   { value: 120, label: '120 秒' },
@@ -120,6 +122,8 @@ function App() {
   const [savingSystemIntegration, setSavingSystemIntegration] = useState(false) // 是否正在保存系统集成设置
   const [savingEnvConfigs, setSavingEnvConfigs] = useState(false) // 是否正在保存环境配置
   const [savingIdleHide, setSavingIdleHide] = useState(false) // 是否正在保存自动隐藏设置
+  const [openingConfigs, setOpeningConfigs] = useState(false) // 是否正在打开 configs 文件夹
+  const [openingLogs, setOpeningLogs] = useState(false) // 是否正在打开 logs 文件夹
   const [idleHideSeconds, setIdleHideSeconds] = useState(60) // 自动隐藏秒数，0=永不隐藏
   const [pickingEnvRowId, setPickingEnvRowId] = useState<number | null>(null) // 正在选择的环境配置ID
   const [editingScriptName, setEditingScriptName] = useState<string | null>(null) // 正在编辑的脚本名称
@@ -336,10 +340,6 @@ function App() {
       }
     }
 
-    const onPointerMove = () => {
-      resetIdleHideTimer()
-    }
-
     const onKeyDown = () => {
       resetIdleHideTimer()
     }
@@ -350,7 +350,6 @@ function App() {
 
     if (windowVisible) {
       window.addEventListener('pointerdown', onPointerDown)
-      window.addEventListener('pointermove', onPointerMove)
       window.addEventListener('keydown', onKeyDown)
       window.addEventListener('wheel', onWheel)
       const isPostRun = justFinishedRunRef.current
@@ -360,7 +359,6 @@ function App() {
 
     return () => {
       window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('wheel', onWheel)
       clearIdleHideTimer()
@@ -800,6 +798,34 @@ function App() {
     }
   }
 
+  const openConfigsFolder = async () => {
+    setOpeningConfigs(true)
+    try {
+      const folderPath = await invoke<string>('open_configs_folder')
+      pushLog('info', `已打开 configs 文件夹: ${folderPath}`)
+    } catch (error) {
+      const errMsg = `打开 configs 文件夹失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setOpeningConfigs(false)
+    }
+  }
+
+  const openLogsFolder = async () => {
+    setOpeningLogs(true)
+    try {
+      const folderPath = await invoke<string>('open_logs_folder')
+      pushLog('info', `已打开 logs 文件夹: ${folderPath}`)
+    } catch (error) {
+      const errMsg = `打开 logs 文件夹失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setOpeningLogs(false)
+    }
+  }
+
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -928,6 +954,38 @@ function App() {
                           </svg>
                         </button>
                         <h1>OmniIsle 设置</h1>
+                        <div className="settings-top-actions">
+                          <button
+                            type="button"
+                            className="back-btn"
+                            onClick={() => void openConfigsFolder()}
+                            aria-label="打开 configs 文件夹"
+                            title="打开 configs 文件夹"
+                            disabled={openingConfigs}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path
+                                fill="currentColor"
+                                d="M22.7 19 13.6 9.9a5.5 5.5 0 0 0-1.5-6.8A5.5 5.5 0 0 0 5.4 1.5L9 5 6 8 2.5 4.5A5.5 5.5 0 0 0 4 11.2a5.5 5.5 0 0 0 6.8 1.5l9.1 9.1a1 1 0 0 0 1.4 0l1.4-1.4a1 1 0 0 0 0-1.4Z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="back-btn"
+                            onClick={() => void openLogsFolder()}
+                            aria-label="打开 logs 文件夹"
+                            title="打开 logs 文件夹"
+                            disabled={openingLogs}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path
+                                fill="currentColor"
+                                d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-5-5Zm0 2.5L16.5 7H14V4.5ZM9 11h6a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm0 4h6a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </header>
 
                       <section className="settings-card panel-settings-card">
