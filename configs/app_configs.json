@@ -2,5 +2,15 @@
   "system_integration": {
     "auto_start_enabled": false,
     "context_menu_enabled": false
-  }
+  },
+  "environments": [
+    {
+      "name": "PYTHON",
+      "executable_path": "D:\\DevEnv\\miniconda3\\envs\\omniisle\\python.exe"
+    },
+    {
+      "name": "NODE",
+      "executable_path": "D:\\DevEnv\\nodejs\\node.exe"
+    }
+  ]
 }

@@ -50,8 +50,17 @@ struct SystemIntegrationConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct EnvironmentConfig {
+  name: String,
+  executable_path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct AppConfigFile {
+  #[serde(default = "default_system_integration")]
   system_integration: SystemIntegrationConfig,
+  #[serde(default = "default_environments")]
+  environments: Vec<EnvironmentConfig>,
 }
 
 #[derive(Serialize, Clone)]
@@ -70,12 +79,30 @@ struct ScriptLogEvent {
   line: String,
 }
 
+fn default_system_integration() -> SystemIntegrationConfig {
+  SystemIntegrationConfig {
+    auto_start_enabled: false,
+    context_menu_enabled: false,
+  }
+}
+
+fn default_environments() -> Vec<EnvironmentConfig> {
+  vec![
+    EnvironmentConfig {
+      name: "PYTHON".to_string(),
+      executable_path: "python".to_string(),
+    },
+    EnvironmentConfig {
+      name: "NODE".to_string(),
+      executable_path: "node".to_string(),
+    },
+  ]
+}
+
 fn default_app_config() -> AppConfigFile {
   AppConfigFile {
-    system_integration: SystemIntegrationConfig {
-      auto_start_enabled: false,
-      context_menu_enabled: false,
-    },
+    system_integration: default_system_integration(),
+    environments: default_environments(),
   }
 }
 
@@ -306,6 +333,19 @@ fn apply_context_menu(enabled: bool) -> Result<(), String> {
 }
 
 fn choose_python_executable() -> String {
+  if let Ok(config) = load_or_init_app_config() {
+    if let Some(found) = config
+      .environments
+      .iter()
+      .find(|item| item.name.trim().eq_ignore_ascii_case("PYTHON"))
+    {
+      let configured = found.executable_path.trim();
+      if !configured.is_empty() {
+        return configured.to_string();
+      }
+    }
+  }
+
   if let Ok(custom) = std::env::var("OMNIISLE_PYTHON") {
     if !custom.trim().is_empty() {
       return custom;
@@ -420,6 +460,80 @@ fn get_system_integration_config() -> Result<SystemIntegrationConfig, String> {
 }
 
 #[tauri::command]
+fn get_environment_configs() -> Result<Vec<EnvironmentConfig>, String> {
+  let config = load_or_init_app_config()?;
+  Ok(config.environments)
+}
+
+#[tauri::command]
+fn set_environment_configs(environments: Vec<EnvironmentConfig>) -> Result<Vec<EnvironmentConfig>, String> {
+  if environments.is_empty() {
+    return Err("至少保留一个环境配置".to_string());
+  }
+
+  let mut cleaned = Vec::<EnvironmentConfig>::new();
+  for item in environments {
+    let name = item.name.trim().to_string();
+    let executable_path = item.executable_path.trim().to_string();
+    if name.is_empty() {
+      continue;
+    }
+    cleaned.push(EnvironmentConfig {
+      name,
+      executable_path,
+    });
+  }
+
+  if cleaned.is_empty() {
+    return Err("环境配置不能为空".to_string());
+  }
+
+  let mut config = load_or_init_app_config()?;
+  config.environments = cleaned.clone();
+  save_app_config(&config)?;
+
+  Ok(cleaned)
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+  let url = url.trim().to_string();
+  if !url.starts_with("https://") && !url.starts_with("http://") {
+    return Err("只允许打开 http/https 链接".to_string());
+  }
+
+  #[cfg(target_os = "windows")]
+  {
+    Command::new("cmd")
+      .args(["/c", "start", "", &url])
+      .spawn()
+      .map_err(|e| format!("打开链接失败: {e}"))?;
+    return Ok(());
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    Err("当前平台暂不支持打开链接".to_string())
+  }
+}
+
+#[tauri::command]
+fn pick_environment_executable() -> Result<Option<String>, String> {
+  #[cfg(target_os = "windows")]
+  {
+    let picked = rfd::FileDialog::new()
+      .add_filter("Executable", &["exe"])
+      .pick_file();
+    return Ok(picked.map(|path| path.to_string_lossy().to_string()));
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    Err("当前平台不支持该选择器".to_string())
+  }
+}
+
+#[tauri::command]
 fn set_system_integration_config(
   auto_start_enabled: bool,
   context_menu_enabled: bool,
@@ -441,9 +555,8 @@ fn set_system_integration_config(
     auto_start_enabled,
     context_menu_enabled,
   };
-  let config = AppConfigFile {
-    system_integration: integration.clone(),
-  };
+  let mut config = load_or_init_app_config()?;
+  config.system_integration = integration.clone();
   save_app_config(&config)?;
 
   Ok(integration)
@@ -597,6 +710,10 @@ pub fn run() {
       get_script_catalog,
       get_system_integration_config,
       set_system_integration_config,
+      get_environment_configs,
+      set_environment_configs,
+      pick_environment_executable,
+      open_url,
       take_startup_job,
       sync_main_window_size
     ])

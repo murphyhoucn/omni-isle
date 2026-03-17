@@ -8,8 +8,8 @@ import './App.css'
 const EXPANDED_WIDTH = 650
 const COLLAPSED_WIDTH = 420
 const APP_VERSION = '0.1.0-demo'
-const APP_AUTHOR = 'OmniIsle Team'
-const GITHUB_REPO_URL = 'https://github.com/'
+const APP_AUTHOR = 'Murphy Hou'
+const GITHUB_REPO_URL = 'https://github.com/murphyhoucn/omni-isle'
 const DEBUG_BODY_BOUNDS = true
 
 type ViewMode = 'island' | 'settings'
@@ -70,6 +70,11 @@ type EnvConfigItem = {
   value: string
 }
 
+type EnvConfigPayload = {
+  name: string
+  executable_path: string
+}
+
 const nowStamp = () =>
   new Date().toLocaleTimeString('zh-CN', {
     hour12: false,
@@ -80,14 +85,6 @@ const nowStamp = () =>
 
 function App() {
   const envNameOptions = ['PYTHON', 'NODE', 'RUST', 'GCC', 'JAVA', 'CUSTOM']
-  const envLookupPresets: Record<string, string> = {
-    PYTHON: 'python',
-    NODE: 'node',
-    RUST: 'rustc',
-    GCC: 'gcc',
-    JAVA: 'java',
-    CUSTOM: '',
-  }
 
   const [viewMode, setViewMode] = useState<ViewMode>('island')
   const [wide, setWide] = useState(false)
@@ -106,6 +103,8 @@ function App() {
   const [autoStartEnabled, setAutoStartEnabled] = useState(false)
   const [contextMenuEnabled, setContextMenuEnabled] = useState(false)
   const [savingSystemIntegration, setSavingSystemIntegration] = useState(false)
+  const [savingEnvConfigs, setSavingEnvConfigs] = useState(false)
+  const [pickingEnvRowId, setPickingEnvRowId] = useState<number | null>(null)
   const [envConfigs, setEnvConfigs] = useState<EnvConfigItem[]>([
     { id: 1, name: 'PYTHON', value: 'python' },
     { id: 2, name: 'NODE', value: 'node' },
@@ -377,8 +376,8 @@ function App() {
     setSavingSystemIntegration(true)
     try {
       const result = await invoke<SystemIntegrationConfig>('set_system_integration_config', {
-        autoStartEnabled: nextAutoStart,
-        contextMenuEnabled: nextContextMenu,
+        auto_start_enabled: nextAutoStart,
+        context_menu_enabled: nextContextMenu,
       })
 
       setAutoStartEnabled(result.auto_start_enabled)
@@ -394,32 +393,78 @@ function App() {
     }
   }
 
-  const addEnvConfigRow = () => {
+  const toEnvPayload = (rows: EnvConfigItem[]): EnvConfigPayload[] =>
+    rows.map((row) => ({
+      name: row.name,
+      executable_path: row.value,
+    }))
+
+  const saveEnvConfigs = async (rows: EnvConfigItem[]) => {
+    setSavingEnvConfigs(true)
+    try {
+      const saved = await invoke<EnvConfigPayload[]>('set_environment_configs', {
+        environments: toEnvPayload(rows),
+      })
+
+      const normalized = saved.map((item, index) => ({
+        id: index + 1,
+        name: item.name,
+        value: item.executable_path,
+      }))
+      setEnvConfigs(normalized)
+      envRowIdRef.current = normalized.length + 1
+      pushLog('success', '环境配置已写入 configs/app_configs.json')
+    } catch (error) {
+      pushLog('error', `保存环境配置失败: ${String(error)}`)
+    } finally {
+      setSavingEnvConfigs(false)
+    }
+  }
+
+  const addEnvConfigRow = async () => {
     const id = envRowIdRef.current
     envRowIdRef.current += 1
-    setEnvConfigs((prev) => [...prev, { id, name: 'CUSTOM', value: '' }])
+    const next = [...envConfigs, { id, name: 'CUSTOM', value: '' }]
+    setEnvConfigs(next)
+    await saveEnvConfigs(next)
   }
 
-  const updateEnvConfigRow = (id: number, patch: Partial<EnvConfigItem>) => {
-    setEnvConfigs((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  const updateEnvConfigRow = async (id: number, patch: Partial<EnvConfigItem>) => {
+    const next = envConfigs.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    setEnvConfigs(next)
+    await saveEnvConfigs(next)
   }
 
-  const removeEnvConfigRow = (id: number) => {
-    setEnvConfigs((prev) => prev.filter((item) => item.id !== id))
+  const removeEnvConfigRow = async (id: number) => {
+    const next = envConfigs.filter((item) => item.id !== id)
+    setEnvConfigs(next)
+    await saveEnvConfigs(next)
   }
 
-  const resolveEnvConfigRow = (row: EnvConfigItem) => {
-    const nextValue = envLookupPresets[row.name] ?? ''
-    if (!nextValue) {
-      pushLog('warn', `未提供 ${row.name} 的默认检索结果，请手动填写`)
-      return
+  const resolveEnvConfigRow = async (row: EnvConfigItem) => {
+    setPickingEnvRowId(row.id)
+    try {
+      const picked = await invoke<string | null>('pick_environment_executable')
+      if (!picked) {
+        pushLog('warn', `${row.name} 环境选择已取消`)
+        return
+      }
+
+      const next = envConfigs.map((item) =>
+        item.id === row.id ? { ...item, value: picked } : item,
+      )
+      setEnvConfigs(next)
+      await saveEnvConfigs(next)
+      pushLog('info', `已选择 ${row.name} 解释器: ${picked}`)
+    } catch (error) {
+      pushLog('error', `打开环境选择器失败: ${String(error)}`)
+    } finally {
+      setPickingEnvRowId(null)
     }
-    updateEnvConfigRow(row.id, { value: nextValue })
-    pushLog('info', `已检索 ${row.name} 运行环境: ${nextValue}`)
   }
 
   useEffect(() => {
-    const loadSystemIntegration = async () => {
+    const loadSettings = async () => {
       try {
         const config = await invoke<SystemIntegrationConfig>('get_system_integration_config')
         setAutoStartEnabled(config.auto_start_enabled)
@@ -427,9 +472,24 @@ function App() {
       } catch (error) {
         pushLog('warn', `读取系统集成配置失败: ${String(error)}`)
       }
+
+      try {
+        const environments = await invoke<EnvConfigPayload[]>('get_environment_configs')
+        if (Array.isArray(environments) && environments.length > 0) {
+          const mapped = environments.map((item, index) => ({
+            id: index + 1,
+            name: item.name,
+            value: item.executable_path,
+          }))
+          setEnvConfigs(mapped)
+          envRowIdRef.current = mapped.length + 1
+        }
+      } catch (error) {
+        pushLog('warn', `读取环境配置失败: ${String(error)}`)
+      }
     }
 
-    void loadSystemIntegration()
+    void loadSettings()
   }, [])
 
   useEffect(() => {
@@ -565,10 +625,10 @@ function App() {
                               <select
                                 className="env-name-select"
                                 value={row.name}
-                                onChange={(event) => {
+                                disabled={savingEnvConfigs || pickingEnvRowId === row.id}
+                                onChange={async (event) => {
                                   const nextName = event.target.value
-                                  const nextValue = envLookupPresets[nextName] ?? row.value
-                                  updateEnvConfigRow(row.id, { name: nextName, value: nextValue })
+                                  await updateEnvConfigRow(row.id, { name: nextName })
                                 }}
                               >
                                 {envNameOptions.map((option) => (
@@ -580,14 +640,23 @@ function App() {
                                 type="text"
                                 value={row.value}
                                 placeholder="在系统中检索到的可执行命令/路径"
-                                onChange={(event) => updateEnvConfigRow(row.id, { value: event.target.value })}
+                                disabled={savingEnvConfigs || pickingEnvRowId === row.id}
+                                onBlur={async (event) => {
+                                  await updateEnvConfigRow(row.id, { value: event.target.value })
+                                }}
+                                onChange={(event) => {
+                                  setEnvConfigs((prev) => prev.map((item) => (
+                                    item.id === row.id ? { ...item, value: event.target.value } : item
+                                  )))
+                                }}
                               />
                               <button
                                 type="button"
                                 className="env-action-btn"
                                 aria-label="系统检索"
                                 title="系统检索"
-                                onClick={() => resolveEnvConfigRow(row)}
+                                disabled={savingEnvConfigs || pickingEnvRowId === row.id}
+                                onClick={async () => resolveEnvConfigRow(row)}
                               >
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                   <path
@@ -601,8 +670,8 @@ function App() {
                                 className="env-action-btn env-action-btn-danger"
                                 aria-label="删除环境配置"
                                 title="删除"
-                                onClick={() => removeEnvConfigRow(row.id)}
-                                disabled={envConfigs.length <= 1}
+                                onClick={async () => removeEnvConfigRow(row.id)}
+                                disabled={envConfigs.length <= 1 || savingEnvConfigs || pickingEnvRowId === row.id}
                               >
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                   <path
@@ -614,7 +683,12 @@ function App() {
                             </div>
                           ))}
                         </div>
-                        <button type="button" className="ghost-btn" onClick={addEnvConfigRow}>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={addEnvConfigRow}
+                          disabled={savingEnvConfigs || pickingEnvRowId !== null}
+                        >
                           + 增加运行环境
                         </button>
                       </section>
@@ -673,12 +747,11 @@ function App() {
                           <p>
                             <span>作者</span>
                             <strong>{APP_AUTHOR}</strong>
-                            <a
+                            <button
+                              type="button"
                               className="github-link compact"
-                              href={GITHUB_REPO_URL}
-                              target="_blank"
-                              rel="noreferrer noopener"
                               aria-label="打开 Github 仓库"
+                              onClick={() => void invoke('open_url', { url: GITHUB_REPO_URL })}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path
@@ -686,7 +759,7 @@ function App() {
                                   d="M12 2C6.48 2 2 6.58 2 12.22c0 4.5 2.87 8.32 6.84 9.66.5.1.68-.22.68-.49 0-.24-.01-1.03-.01-1.86-2.78.62-3.37-1.21-3.37-1.21-.45-1.2-1.11-1.52-1.11-1.52-.91-.64.07-.63.07-.63 1 .08 1.53 1.05 1.53 1.05.9 1.57 2.36 1.12 2.93.86.09-.67.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.04 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.27 2.75 1.05A9.28 9.28 0 0 1 12 6.77a9.3 9.3 0 0 1 2.5.35c1.9-1.32 2.74-1.05 2.74-1.05.55 1.41.2 2.46.1 2.72.64.71 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.31.67.92.67 1.86 0 1.34-.01 2.42-.01 2.74 0 .27.18.59.69.49A10.25 10.25 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z"
                                 />
                               </svg>
-                            </a>
+                            </button>
                           </p>
                         </div>
                       </section>
