@@ -12,6 +12,8 @@ const APP_AUTHOR = 'Murphy Hou'
 const GITHUB_REPO_URL = 'https://github.com/murphyhoucn/omni-isle'
 const DEBUG_BODY_BOUNDS = false // 调试用，是否显示主窗口边界框
 
+const POST_RUN_HIDE_SECONDS = 5 // 任务完成后自动隐藏的短暂延迟（秒）
+
 const IDLE_HIDE_OPTIONS = [
   { value: 30, label: '30 秒' },
   { value: 60, label: '60 秒' },
@@ -143,6 +145,7 @@ function App() {
   const closeTimer = useRef<number | null>(null) // 关闭定时器
   const actionFeedbackTimer = useRef<number | null>(null) // 操作反馈定时器
   const idleHideTimer = useRef<number | null>(null) // 无交互自动隐藏定时器
+  const justFinishedRunRef = useRef(false) // 标记刚刚完成了一次任务运行
 
 
 
@@ -192,15 +195,18 @@ function App() {
     }
   }
 
-  const resetIdleHideTimer = () => {
+  const resetIdleHideTimer = (postRun = false) => {
     clearIdleHideTimer()
     if (busy || !windowVisible || idleHideSeconds <= 0) {
       return
     }
+    const delaySecs = postRun
+      ? Math.min(POST_RUN_HIDE_SECONDS, idleHideSeconds)
+      : idleHideSeconds
     idleHideTimer.current = window.setTimeout(() => {
       idleHideTimer.current = null
       void hideWindowByIdle()
-    }, idleHideSeconds * 1000)
+    }, delaySecs * 1000)
   }
 
   const saveIdleHideSeconds = async (nextSeconds: number) => {
@@ -347,7 +353,9 @@ function App() {
       window.addEventListener('pointermove', onPointerMove)
       window.addEventListener('keydown', onKeyDown)
       window.addEventListener('wheel', onWheel)
-      resetIdleHideTimer()
+      const isPostRun = justFinishedRunRef.current
+      justFinishedRunRef.current = false
+      resetIdleHideTimer(isPostRun)
     }
 
     return () => {
@@ -586,6 +594,7 @@ function App() {
       if (unlisten) {
         unlisten()
       }
+      justFinishedRunRef.current = true
       setBusy(false)
       setActiveJob(null)
     }
