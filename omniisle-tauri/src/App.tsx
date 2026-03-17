@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
@@ -121,11 +122,30 @@ function App() {
   const closeIsland = () => {
     clearTimers()
     setShowPanel(false)
+    setViewMode('island')
     closeTimer.current = window.setTimeout(() => {
       setWide(false)
       closeTimer.current = null
     }, 95)
   }
+
+  useEffect(() => {
+    let unlistenBlur: () => void;
+
+    const setupBlurListener = async () => {
+      unlistenBlur = await getCurrentWindow().listen('tauri://blur', () => {
+        closeIsland()
+      })
+    }
+
+    setupBlurListener()
+
+    return () => {
+      if (unlistenBlur) {
+        unlistenBlur()
+      }
+    }
+  }, [showPanel, wide, viewMode])
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -137,14 +157,14 @@ function App() {
       }
     }
 
-    if (showPanel || wide) {
+    if (showPanel || wide || viewMode === 'settings') {
       window.addEventListener('pointerdown', onPointerDown)
     }
 
     return () => {
       window.removeEventListener('pointerdown', onPointerDown)
     }
-  }, [showPanel, wide])
+  }, [showPanel, wide, viewMode])
 
   useEffect(() => () => clearTimers(), [])
 
@@ -333,10 +353,8 @@ function App() {
             type="button"
           >
             <span className="dot" />
-            <span>{viewMode === 'settings' ? '设置' : statusText}</span>
-            <span className="ghost">OmniIsle</span>
-          </button>
-
+              <span className="status-text">{viewMode === 'settings' ? '设置' : statusText}</span>              <span className="ghost">OmniIsle</span>
+            </button>
           <AnimatePresence>
             {panelVisible && (
               <motion.div
