@@ -1,16 +1,25 @@
 {
   "system_integration": {
-    "auto_start_enabled": false,
-    "context_menu_enabled": false
+    "auto_start_enabled": true,
+    "context_menu_enabled": true
   },
   "environments": [
     {
       "name": "PYTHON",
-      "executable_path": "D:\\DevEnv\\miniconda3\\envs\\omniisle\\python.exe"
+      "executable_path": "D:\\DevEnv\\miniconda3\\envs\\omniisle"
     },
     {
       "name": "NODE",
-      "executable_path": "D:\\DevEnv\\nodejs\\node.exe"
+      "executable_path": "D:\\DevEnv\\nodejs"
+    },
+    {
+      "name": "GCC/G++",
+      "executable_path": "D:\\DevEnv\\mingw64\\bin"
+    },
+    {
+      "name": "JAVA",
+      "executable_path": "D:\\DevEnv\\Java\\jdk_1.8\\bin"
     }
-  ]
+  ],
+  "idle_hide_seconds": 30
 }

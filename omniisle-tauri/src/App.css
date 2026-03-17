@@ -563,6 +563,34 @@ div.log-box::-webkit-scrollbar-corner {
   gap: 10px;
 }
 
+.idle-hide-row {
+  margin-top: 10px;
+  border: 1px solid rgba(187, 222, 244, 0.06);
+  border-radius: 12px;
+  background: rgba(4, 10, 14, 0.75);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.idle-hide-select {
+  height: 32px;
+  min-width: 150px;
+  border-radius: 9px;
+  border: 1px solid rgba(187, 222, 244, 0.08);
+  background: rgba(8, 18, 28, 0.88);
+  color: #d2e5f3;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.idle-hide-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .env-config-list {
   margin-top: 10px;
   display: grid;
@@ -726,11 +754,42 @@ ul.script-list::-webkit-scrollbar-button {
   font-size: 12px;
   display: grid;
   place-items: center;
+  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease, color 140ms ease, box-shadow 160ms ease;
 }
 
 .script-icon-btn svg {
   width: 14px;
   height: 14px;
+}
+
+.script-icon-btn:hover:not(:disabled) {
+  border-color: rgba(187, 222, 244, 0.24);
+  background: rgba(15, 30, 43, 0.95);
+  color: #d8e8f5;
+}
+
+.script-icon-btn:active:not(:disabled),
+.script-icon-btn.is-pressed:not(:disabled) {
+  transform: translateY(1px) scale(0.94);
+  box-shadow: inset 0 0 0 1px rgba(140, 185, 214, 0.18);
+}
+
+.script-icon-btn.is-working:not(:disabled) {
+  border-color: rgba(95, 167, 221, 0.52);
+  box-shadow: 0 0 0 3px rgba(95, 167, 221, 0.16);
+}
+
+.script-icon-btn.is-working svg {
+  animation: script-icon-working-spin 0.75s linear infinite;
+}
+
+@keyframes script-icon-working-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .script-icon-btn-danger {
@@ -754,6 +813,120 @@ ul.script-list::-webkit-scrollbar-button {
   margin-top: 10px;
   width: auto;
   padding: 0 10px;
+}
+
+.script-create-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(111, 172, 214, 0.24);
+  background: linear-gradient(160deg, rgba(8, 22, 32, 0.96), rgba(6, 16, 24, 0.94));
+  display: grid;
+  gap: 8px;
+}
+
+.script-create-field {
+  display: grid;
+  gap: 5px;
+}
+
+.script-create-field span {
+  font-size: 12px;
+  color: #aac3d6;
+}
+
+.script-create-input {
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(145, 196, 227, 0.18);
+  background: rgba(5, 12, 20, 0.82);
+  color: #d7e6f2;
+  padding: 0 10px;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.script-create-input::placeholder {
+  color: #6f8a9f;
+}
+
+.script-create-input:focus {
+  border-color: rgba(130, 197, 238, 0.62);
+  box-shadow: 0 0 0 3px rgba(63, 139, 183, 0.18);
+}
+
+.script-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.script-delete-confirm {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 135, 135, 0.35);
+  background: linear-gradient(160deg, rgba(45, 9, 9, 0.9), rgba(28, 7, 7, 0.94));
+  display: grid;
+  gap: 7px;
+}
+
+.script-delete-confirm p {
+  margin: 0;
+  font-size: 13px;
+  color: #ffd2d2;
+}
+
+.script-delete-confirm p strong {
+  color: #ffe8e8;
+}
+
+.script-delete-confirm span {
+  color: #efb0b0;
+  font-size: 12px;
+}
+
+.script-delete-confirm-btn {
+  border-color: rgba(255, 140, 140, 0.45);
+  color: #ffd6d6;
+  background: rgba(78, 20, 20, 0.9);
+}
+
+.script-delete-confirm-btn:hover:not(:disabled) {
+  color: #ffe3e3;
+  border-color: rgba(255, 173, 173, 0.64);
+  background: rgba(93, 25, 25, 0.95);
+}
+
+.script-create-btn {
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(171, 209, 232, 0.26);
+  background: rgba(7, 18, 28, 0.86);
+  color: #cae0ef;
+  padding: 0 12px;
+  font-size: 12px;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 120ms ease;
+}
+
+.script-create-btn:hover:not(:disabled) {
+  border-color: rgba(174, 219, 246, 0.45);
+  background: rgba(12, 28, 40, 0.95);
+}
+
+.script-create-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.script-create-btn-primary {
+  border-color: rgba(111, 187, 229, 0.44);
+  background: linear-gradient(160deg, rgba(27, 83, 117, 0.9), rgba(17, 57, 84, 0.92));
+  color: #e8f4ff;
+}
+
+.script-create-btn-primary:hover:not(:disabled) {
+  border-color: rgba(128, 206, 247, 0.66);
+  background: linear-gradient(160deg, rgba(39, 100, 137, 0.95), rgba(22, 69, 98, 0.95));
 }
 
 .about-lines {

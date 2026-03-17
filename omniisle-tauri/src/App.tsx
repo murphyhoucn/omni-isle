@@ -6,11 +6,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const EXPANDED_WIDTH = 650
-const COLLAPSED_WIDTH = 420
+const COLLAPSED_WIDTH = 300
 const APP_VERSION = '0.1.0-demo'
 const APP_AUTHOR = 'Murphy Hou'
 const GITHUB_REPO_URL = 'https://github.com/murphyhoucn/omni-isle'
-const DEBUG_BODY_BOUNDS = true
+const DEBUG_BODY_BOUNDS = false // 调试用，是否显示主窗口边界框
+
+const IDLE_HIDE_OPTIONS = [
+  { value: 30, label: '30 秒' },
+  { value: 60, label: '60 秒' },
+  { value: 120, label: '120 秒' },
+  { value: 0, label: '永不自动隐藏' },
+] as const
 
 type ViewMode = 'island' | 'settings'
 type RunState = 'ready' | 'queued' | 'running' | 'success' | 'error'
@@ -83,42 +90,65 @@ const nowStamp = () =>
     second: '2-digit',
   })
 
+/**
+ * 主应用组件，包含整个应用的逻辑和UI渲染
+ */
 function App() {
-  const envNameOptions = ['PYTHON', 'NODE', 'RUST', 'GCC', 'JAVA', 'CUSTOM']
+  // 环境名称选项列表
+  const envNameOptions = ['PYTHON', 'NODE', 'RUST', 'GCC/G++', 'JAVA', 'CUSTOM']
 
-  const [viewMode, setViewMode] = useState<ViewMode>('island')
-  const [wide, setWide] = useState(false)
+
+
+  // 视图模式状态管理
+  const [viewMode, setViewMode] = useState<ViewMode>('island') // 当前视图模式
+  const [wide, setWide] = useState(false) // 是否展开状态
   const [showPanel, setShowPanel] = useState(false)
   const [runState, setRunState] = useState<RunState>('ready')
-  const [logs, setLogs] = useState<LogEntry[]>([
+  const [windowVisible, setWindowVisible] = useState(true)
+  const [logs, setLogs] = useState<LogEntry[]>([ // 日志列表
     { id: 1, level: 'info', text: 'OmniIsle island online', at: nowStamp() },
   ])
-  const [scriptItems, setScriptItems] = useState<ScriptMenuItem[]>([
-    { label: '运行成功脚本', script: 'mock_success.py' },
-    { label: '运行失败脚本(演示)', script: 'mock_error.py' },
-  ])
-  const [busy, setBusy] = useState(false)
-  const [queue, setQueue] = useState<QueueJob[]>([])
-  const [activeJob, setActiveJob] = useState<QueueJob | null>(null)
-  const [autoStartEnabled, setAutoStartEnabled] = useState(false)
-  const [contextMenuEnabled, setContextMenuEnabled] = useState(false)
-  const [savingSystemIntegration, setSavingSystemIntegration] = useState(false)
-  const [savingEnvConfigs, setSavingEnvConfigs] = useState(false)
-  const [pickingEnvRowId, setPickingEnvRowId] = useState<number | null>(null)
-  const [envConfigs, setEnvConfigs] = useState<EnvConfigItem[]>([
+  const [scriptItems, setScriptItems] = useState<ScriptMenuItem[]>([]) // 脚本项目列表
+  const [busy, setBusy] = useState(false) // 是否忙碌状态
+  const [savingScripts, setSavingScripts] = useState(false) // 是否正在保存脚本
+  const [queue, setQueue] = useState<QueueJob[]>([]) // 任务队列
+  const [activeJob, setActiveJob] = useState<QueueJob | null>(null) // 当前活动任务
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false) // 是否启用自启动
+  const [contextMenuEnabled, setContextMenuEnabled] = useState(false) // 是否启用右键菜单
+  const [savingSystemIntegration, setSavingSystemIntegration] = useState(false) // 是否正在保存系统集成设置
+  const [savingEnvConfigs, setSavingEnvConfigs] = useState(false) // 是否正在保存环境配置
+  const [savingIdleHide, setSavingIdleHide] = useState(false) // 是否正在保存自动隐藏设置
+  const [idleHideSeconds, setIdleHideSeconds] = useState(60) // 自动隐藏秒数，0=永不隐藏
+  const [pickingEnvRowId, setPickingEnvRowId] = useState<number | null>(null) // 正在选择的环境配置ID
+  const [editingScriptName, setEditingScriptName] = useState<string | null>(null) // 正在编辑的脚本名称
+  const [actionFeedbackKey, setActionFeedbackKey] = useState<string | null>(null) // 操作反馈键
+  const [showAddScriptForm, setShowAddScriptForm] = useState(false) // 是否显示添加脚本表单
+  const [pendingDeleteScript, setPendingDeleteScript] = useState<ScriptMenuItem | null>(null) // 待确认删除的脚本
+  const [newScriptName, setNewScriptName] = useState('') // 新脚本名称
+  const [newScriptLabel, setNewScriptLabel] = useState('') // 新脚本标签
+  const [envConfigs, setEnvConfigs] = useState<EnvConfigItem[]>([ // 环境配置列表
     { id: 1, name: 'PYTHON', value: 'python' },
     { id: 2, name: 'NODE', value: 'node' },
   ])
 
-  const panelRef = useRef<HTMLDivElement | null>(null)
-  const logRef = useRef<HTMLDivElement | null>(null)
-  const logIdRef = useRef(2)
-  const envRowIdRef = useRef(3)
-  const openTimer = useRef<number | null>(null)
-  const closeTimer = useRef<number | null>(null)
 
-  const meta = useMemo(() => stateMeta[runState], [runState])
-  const statusText = useMemo(() => {
+
+  // DOM引用
+  const panelRef = useRef<HTMLDivElement | null>(null) // 面板引用
+  const logRef = useRef<HTMLDivElement | null>(null) // 日志区域引用
+  const logIdRef = useRef(2) // 日志ID计数器
+  const scriptItemsRef = useRef<ScriptMenuItem[]>([])
+  const envRowIdRef = useRef(3) // 环境配置行ID计数器
+  const openTimer = useRef<number | null>(null) // 打开定时器
+  const closeTimer = useRef<number | null>(null) // 关闭定时器
+  const actionFeedbackTimer = useRef<number | null>(null) // 操作反馈定时器
+  const idleHideTimer = useRef<number | null>(null) // 无交互自动隐藏定时器
+
+
+
+  // 计算属性
+  const meta = useMemo(() => stateMeta[runState], [runState]) // 根据运行状态获取元数据
+  const statusText = useMemo(() => { // 状态文本
     if (runState === 'running' && queue.length > 0) {
       return `处理中... 队列 ${queue.length}`
     }
@@ -128,6 +158,7 @@ function App() {
     return meta.text
   }, [meta.text, queue.length, runState])
 
+  // 清除所有定时器
   const clearTimers = () => {
     if (openTimer.current) {
       window.clearTimeout(openTimer.current)
@@ -137,17 +168,88 @@ function App() {
       window.clearTimeout(closeTimer.current)
       closeTimer.current = null
     }
+    if (actionFeedbackTimer.current) {
+      window.clearTimeout(actionFeedbackTimer.current)
+      actionFeedbackTimer.current = null
+    }
   }
 
+  const clearIdleHideTimer = () => {
+    if (idleHideTimer.current) {
+      window.clearTimeout(idleHideTimer.current)
+      idleHideTimer.current = null
+    }
+  }
+
+  const hideWindowByIdle = async () => {
+    closeIsland()
+    try {
+      await getCurrentWindow().hide()
+      setWindowVisible(false)
+      pushLog('info', '长时间无交互，已自动隐藏界面（托盘常驻）')
+    } catch {
+      // ignore hide failures
+    }
+  }
+
+  const resetIdleHideTimer = () => {
+    clearIdleHideTimer()
+    if (busy || !windowVisible || idleHideSeconds <= 0) {
+      return
+    }
+    idleHideTimer.current = window.setTimeout(() => {
+      idleHideTimer.current = null
+      void hideWindowByIdle()
+    }, idleHideSeconds * 1000)
+  }
+
+  const saveIdleHideSeconds = async (nextSeconds: number) => {
+    setSavingIdleHide(true)
+    try {
+      const saved = await invoke<number>('set_idle_hide_seconds', {
+        idleHideSeconds: nextSeconds,
+      })
+      setIdleHideSeconds(saved)
+      if (saved === 0) {
+        clearIdleHideTimer()
+      } else {
+        resetIdleHideTimer()
+      }
+      pushLog('success', `自动隐藏已更新: ${saved === 0 ? '永不自动隐藏' : `${saved} 秒`}`)
+    } catch (error) {
+      const errMsg = `保存自动隐藏设置失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setSavingIdleHide(false)
+    }
+  }
+
+  // 显示操作反馈
+  const flashActionFeedback = (key: string) => {
+    setActionFeedbackKey(key)
+    if (actionFeedbackTimer.current) {
+      window.clearTimeout(actionFeedbackTimer.current)
+    }
+    actionFeedbackTimer.current = window.setTimeout(() => {
+      setActionFeedbackKey(null)
+      actionFeedbackTimer.current = null
+    }, 180)
+  }
+
+  // 打开面板
   const openIsland = () => {
     clearTimers()
+    setWindowVisible(true)
     setWide(true)
     openTimer.current = window.setTimeout(() => {
       setShowPanel(true)
       openTimer.current = null
+      resetIdleHideTimer()
     }, 85)
   }
 
+  // 关闭面板
   const closeIsland = () => {
     clearTimers()
     setShowPanel(false)
@@ -158,6 +260,7 @@ function App() {
     }, 95)
   }
 
+  // 监听窗口失焦事件
   useEffect(() => {
     let unlistenBlur: () => void;
 
@@ -177,6 +280,32 @@ function App() {
   }, [showPanel, wide, viewMode])
 
   useEffect(() => {
+    let unlistenTrayShow: (() => void) | undefined
+
+    const setupTrayShowListener = async () => {
+      unlistenTrayShow = await listen('tray-show-island', async () => {
+        try {
+          await getCurrentWindow().show()
+        } catch {
+          // ignore show failures
+        }
+        setWindowVisible(true)
+        setViewMode('island')
+        openIsland()
+        await consumePendingStartupJob('右键触发入队')
+      })
+    }
+
+    void setupTrayShowListener()
+
+    return () => {
+      if (unlistenTrayShow) {
+        unlistenTrayShow()
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     if (!DEBUG_BODY_BOUNDS) {
       return
     }
@@ -192,6 +321,7 @@ function App() {
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
+      resetIdleHideTimer()
       if (!panelRef.current) {
         return
       }
@@ -200,16 +330,39 @@ function App() {
       }
     }
 
-    if (showPanel || wide || viewMode === 'settings') {
+    const onPointerMove = () => {
+      resetIdleHideTimer()
+    }
+
+    const onKeyDown = () => {
+      resetIdleHideTimer()
+    }
+
+    const onWheel = () => {
+      resetIdleHideTimer()
+    }
+
+    if (windowVisible) {
       window.addEventListener('pointerdown', onPointerDown)
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('keydown', onKeyDown)
+      window.addEventListener('wheel', onWheel)
+      resetIdleHideTimer()
     }
 
     return () => {
       window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('wheel', onWheel)
+      clearIdleHideTimer()
     }
-  }, [showPanel, wide, viewMode])
+  }, [windowVisible, showPanel, wide, viewMode, busy, idleHideSeconds])
 
-  useEffect(() => () => clearTimers(), [])
+  useEffect(() => () => {
+    clearTimers()
+    clearIdleHideTimer()
+  }, [])
 
   useEffect(() => {
     if (!logRef.current) {
@@ -240,45 +393,78 @@ function App() {
     setLogs((prev) => [...prev, { id, level, text, at: nowStamp() }].slice(-180))
   }
 
+  const enqueueStartupJob = (startup: StartupJob, source: string) => {
+    if (!startup.script) {
+      return
+    }
+
+    const matched = scriptItemsRef.current.find((item) => item.script === startup.script)
+    const targetPath = startup.target_path ?? undefined
+    const nextJob: QueueJob = {
+      label: matched?.label ?? startup.script,
+      script: startup.script,
+      targetPath,
+    }
+
+    setViewMode('island')
+    openIsland()
+    setQueue((prev) => [...prev, nextJob])
+    setRunState((prev) => (prev === 'running' ? prev : 'queued'))
+    pushLog('queue', `${source}: ${nextJob.label}${targetPath ? ` (${targetPath})` : ''}`)
+    logToFile('INFO', `startup job enqueued: ${nextJob.script}${targetPath ? ` target=${targetPath}` : ''}`)
+  }
+
+  const consumePendingStartupJob = async (source: string) => {
+    try {
+      const startup = await invoke<StartupJob | null>('take_startup_job')
+      if (!startup || !startup.script) {
+        logToFile('INFO', `startup job not available for source: ${source}`)
+        return false
+      }
+
+      enqueueStartupJob(startup, source)
+      return true
+    } catch {
+      logToFile('WARN', `startup job consume failed for source: ${source}`)
+      return false
+    }
+  }
+
+  /** Write a message to the on-disk application log (fire-and-forget). */
+  const logToFile = (level: 'ERROR' | 'WARN' | 'INFO', message: string) => {
+    void invoke('write_app_log', { level, message }).catch(() => {})
+  }
+
+  useEffect(() => {
+    scriptItemsRef.current = scriptItems
+  }, [scriptItems])
+
   useEffect(() => {
     const queueStartupJob = async (catalog: ScriptMenuItem[]) => {
       try {
-        const startup = await invoke<StartupJob | null>('take_startup_job')
-        if (!startup || !startup.script) {
+        scriptItemsRef.current = catalog
+        const consumed = await consumePendingStartupJob('右键触发入队')
+        if (!consumed) {
           return
         }
-
-        const matched = catalog.find((item) => item.script === startup.script)
-        const targetPath = startup.target_path ?? undefined
-        const nextJob: QueueJob = {
-          label: matched?.label ?? startup.script,
-          script: startup.script,
-          targetPath,
-        }
-
-        setViewMode('island')
-        openIsland()
-        setQueue((prev) => [...prev, nextJob])
-        setRunState((prev) => (prev === 'running' ? prev : 'queued'))
-        pushLog('queue', `右键触发入队: ${nextJob.label}${targetPath ? ` (${targetPath})` : ''}`)
       } catch {
         pushLog('warn', '未能读取启动参数任务，继续待机')
       }
     }
 
     const loadScriptCatalog = async () => {
-      let catalog = scriptItems
+      let catalog: ScriptMenuItem[] = []
 
       try {
         const items = await invoke<ScriptMenuItem[]>('get_script_catalog')
-        if (Array.isArray(items) && items.length > 0) {
+        if (Array.isArray(items)) {
           setScriptItems(items)
           catalog = items
-        } else {
-          pushLog('warn', '脚本配置为空，使用默认演示脚本')
         }
       } catch (error) {
-        pushLog('warn', `读取脚本配置失败，使用默认演示脚本: ${String(error)}`)
+        const errMsg = `读取脚本配置失败: ${String(error)}`
+        pushLog('warn', errMsg)
+        logToFile('WARN', errMsg)
       }
 
       await queueStartupJob(catalog)
@@ -287,13 +473,66 @@ function App() {
     void loadScriptCatalog()
   }, [])
 
+  const resolveEnvExecutable = (envNames: string | string[], fallback: string) => {
+    const candidates = Array.isArray(envNames) ? envNames : [envNames]
+    const found = envConfigs.find((item) =>
+      candidates.some((name) => item.name.trim().toUpperCase() === name.toUpperCase()),
+    )
+    const configured = found?.value.trim() ?? ''
+    return configured || fallback
+  }
+
+  const runtimeHintForScript = (scriptName: string) => {
+    const ext = scriptName.split('.').pop()?.toLowerCase() ?? ''
+
+    if (ext === 'py') {
+      return {
+        runtime: 'Python',
+        executable: resolveEnvExecutable('PYTHON', 'python'),
+        action: `执行脚本: configs/scripts/${scriptName}`,
+      }
+    }
+
+    if (ext === 'js' || ext === 'mjs' || ext === 'cjs') {
+      return {
+        runtime: 'Node.js',
+        executable: resolveEnvExecutable('NODE', 'node'),
+        action: `执行脚本: configs/scripts/${scriptName}`,
+      }
+    }
+
+    if (ext === 'java') {
+      return {
+        runtime: 'Java (javac -> java)',
+        executable: resolveEnvExecutable('JAVA', 'java'),
+        action: `编译并运行: configs/scripts/${scriptName}`,
+      }
+    }
+
+    if (ext === 'c' || ext === 'cpp' || ext === 'cc' || ext === 'cxx') {
+      return {
+        runtime: 'GCC/G++',
+        executable: resolveEnvExecutable(['GCC/G++', 'GCC'], 'gcc'),
+        action: `编译并运行: configs/scripts/${scriptName}`,
+      }
+    }
+
+    return {
+      runtime: '未知',
+      executable: '-',
+      action: `尝试执行: configs/scripts/${scriptName}`,
+    }
+  }
+
   const executeJob = async (job: QueueJob) => {
     setBusy(true)
     setRunState('running')
-    pushLog(
-      'info',
-      `开始执行: ${job.label} (${job.script})${job.targetPath ? ` -> ${job.targetPath}` : ''}`,
-    )
+    const runtimeHint = runtimeHintForScript(job.script)
+    pushLog('info', `运行环境: ${runtimeHint.runtime} (${runtimeHint.executable})`)
+    pushLog('info', runtimeHint.action)
+    if (job.targetPath) {
+      pushLog('info', `目标路径: ${job.targetPath}`)
+    }
 
     let gotStreamLog = false
     let unlisten: null | (() => void) = null
@@ -340,7 +579,9 @@ function App() {
       }
     } catch (error) {
       setRunState('error')
-      pushLog('error', `Tauri 后端执行失败: ${String(error)}`)
+      const errMsg = `Tauri 后端执行失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
     } finally {
       if (unlisten) {
         unlisten()
@@ -351,6 +592,8 @@ function App() {
   }
 
   const queueScriptRun = (item: ScriptMenuItem) => {
+    flashActionFeedback(`run-${item.script}`)
+
     const nextJob: QueueJob = {
       label: item.label,
       script: item.script,
@@ -363,21 +606,100 @@ function App() {
     openIsland()
   }
 
-  const onEditScript = (item: ScriptMenuItem) => {
-    pushLog('warn', `编辑脚本待实现: ${item.label} (${item.script})`)
+  const onEditScript = async (item: ScriptMenuItem) => {
+    flashActionFeedback(`edit-${item.script}`)
+    setEditingScriptName(item.script)
+    try {
+      await invoke('open_script_in_editor', { scriptName: item.script })
+      pushLog('info', `已用默认编辑器打开: ${item.script}`)
+    } catch (error) {
+      const errMsg = `打开脚本失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setEditingScriptName((prev) => (prev === item.script ? null : prev))
+    }
   }
 
-  const onDeleteScript = (item: ScriptMenuItem) => {
-    setScriptItems((prev) => prev.filter((script) => script.script !== item.script))
-    pushLog('info', `已从列表移除脚本: ${item.label} (${item.script})`)
+  const requestDeleteScript = (item: ScriptMenuItem) => {
+    setPendingDeleteScript(item)
+  }
+
+  const cancelDeleteScript = () => {
+    if (savingScripts) {
+      return
+    }
+    setPendingDeleteScript(null)
+  }
+
+  const confirmDeleteScript = async () => {
+    if (!pendingDeleteScript) {
+      return
+    }
+
+    const item = pendingDeleteScript
+    setSavingScripts(true)
+    try {
+      const updated = await invoke<ScriptMenuItem[]>('delete_script_item', {
+        scriptName: item.script,
+      })
+      setScriptItems(updated)
+      pushLog('success', `已删除脚本: ${item.label} (${item.script})`)
+      setPendingDeleteScript(null)
+    } catch (error) {
+      const errMsg = `删除脚本失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setSavingScripts(false)
+    }
+  }
+
+  const startAddScript = () => {
+    setShowAddScriptForm(true)
+    setNewScriptName('')
+    setNewScriptLabel('')
+  }
+
+  const cancelAddScript = () => {
+    setShowAddScriptForm(false)
+    setNewScriptName('')
+    setNewScriptLabel('')
+  }
+
+  const onAddScript = async () => {
+    const scriptName = newScriptName.trim()
+    if (!scriptName) {
+      pushLog('warn', '脚本文件名不能为空')
+      return
+    }
+
+    const label = newScriptLabel.trim() || scriptName
+
+    setSavingScripts(true)
+    try {
+      const updated = await invoke<ScriptMenuItem[]>('create_script_item', {
+        label,
+        scriptName,
+      })
+      setScriptItems(updated)
+      pushLog('success', `已新增脚本并打开编辑器: ${scriptName}`)
+      cancelAddScript()
+    } catch (error) {
+      const errMsg = `新增脚本失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setSavingScripts(false)
+    }
   }
 
   const saveSystemIntegration = async (nextAutoStart: boolean, nextContextMenu: boolean) => {
     setSavingSystemIntegration(true)
     try {
       const result = await invoke<SystemIntegrationConfig>('set_system_integration_config', {
-        auto_start_enabled: nextAutoStart,
-        context_menu_enabled: nextContextMenu,
+        autoStartEnabled: nextAutoStart,
+        contextMenuEnabled: nextContextMenu,
       })
 
       setAutoStartEnabled(result.auto_start_enabled)
@@ -387,7 +709,9 @@ function App() {
         `系统集成已更新: 开机自启动 ${result.auto_start_enabled ? '开启' : '关闭'}，右键菜单 ${result.context_menu_enabled ? '开启' : '关闭'}`,
       )
     } catch (error) {
-      pushLog('error', `系统集成设置失败: ${String(error)}`)
+      const errMsg = `系统集成设置失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
     } finally {
       setSavingSystemIntegration(false)
     }
@@ -415,7 +739,9 @@ function App() {
       envRowIdRef.current = normalized.length + 1
       pushLog('success', '环境配置已写入 configs/app_configs.json')
     } catch (error) {
-      pushLog('error', `保存环境配置失败: ${String(error)}`)
+      const errMsg = `保存环境配置失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
     } finally {
       setSavingEnvConfigs(false)
     }
@@ -455,9 +781,11 @@ function App() {
       )
       setEnvConfigs(next)
       await saveEnvConfigs(next)
-      pushLog('info', `已选择 ${row.name} 解释器: ${picked}`)
+      pushLog('info', `已选择 ${row.name} 运行路径: ${picked}`)
     } catch (error) {
-      pushLog('error', `打开环境选择器失败: ${String(error)}`)
+      const errMsg = `打开环境选择器失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
     } finally {
       setPickingEnvRowId(null)
     }
@@ -470,7 +798,9 @@ function App() {
         setAutoStartEnabled(config.auto_start_enabled)
         setContextMenuEnabled(config.context_menu_enabled)
       } catch (error) {
-        pushLog('warn', `读取系统集成配置失败: ${String(error)}`)
+        const errMsg = `读取系统集成配置失败: ${String(error)}`
+        pushLog('warn', errMsg)
+        logToFile('WARN', errMsg)
       }
 
       try {
@@ -485,7 +815,18 @@ function App() {
           envRowIdRef.current = mapped.length + 1
         }
       } catch (error) {
-        pushLog('warn', `读取环境配置失败: ${String(error)}`)
+        const errMsg = `读取环境配置失败: ${String(error)}`
+        pushLog('warn', errMsg)
+        logToFile('WARN', errMsg)
+      }
+
+      try {
+        const seconds = await invoke<number>('get_idle_hide_seconds')
+        setIdleHideSeconds(seconds)
+      } catch (error) {
+        const errMsg = `读取自动隐藏设置失败: ${String(error)}`
+        pushLog('warn', errMsg)
+        logToFile('WARN', errMsg)
       }
     }
 
@@ -614,10 +955,26 @@ function App() {
                             </button>
                           </div>
                         </div>
+                        <div className="idle-hide-row">
+                          <span className="setting-tip">最小岛无交互自动隐藏</span>
+                          <select
+                            className="idle-hide-select"
+                            value={idleHideSeconds}
+                            disabled={savingIdleHide}
+                            onChange={(event) => {
+                              const next = Number(event.target.value)
+                              void saveIdleHideSeconds(next)
+                            }}
+                          >
+                            {IDLE_HIDE_OPTIONS.map((option) => (
+                              <option key={`idle-${option.value}`} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
                       </section>
 
                       <section className="settings-card panel-settings-card">
-                        <h2>运行环境变量</h2>
+                        <h2>运行环境</h2>
                         <p>每行一个运行环境，可新增更多环境并在系统中检索默认命令。</p>
                         <div className="env-config-list">
                           {envConfigs.map((row) => (
@@ -689,14 +1046,22 @@ function App() {
                           onClick={addEnvConfigRow}
                           disabled={savingEnvConfigs || pickingEnvRowId !== null}
                         >
-                          + 增加运行环境
+                          + 添加运行环境
                         </button>
                       </section>
 
                       <section className="settings-card panel-settings-card">
                         <h2>脚本管理</h2>
-                        <p>维护执行脚本清单，后续支持添加、编辑与排序。</p>
+                        <p>支持新增、编辑、删除；运行时根据脚本类型自动匹配运行环境。</p>
                         <ul className="script-list">
+                          {scriptItems.length === 0 && (
+                            <li>
+                              <div className="script-label">
+                                <span className="script-name">暂无脚本</span>
+                                <span className="script-file">请点击下方“添加脚本”</span>
+                              </div>
+                            </li>
+                          )}
                           {scriptItems.map((item) => (
                             <li key={`manage-${item.script}`}>
                               <div className="script-label" title={`${item.label}\n${item.script}`}>
@@ -704,12 +1069,26 @@ function App() {
                                 <span className="script-file">{item.script}</span>
                               </div>
                               <div className="script-actions">
-                                <button type="button" className="script-icon-btn" onClick={() => queueScriptRun(item)} aria-label="运行脚本" title="运行">
+                                <button
+                                  type="button"
+                                  className={`script-icon-btn ${actionFeedbackKey === `run-${item.script}` ? 'is-pressed' : ''}`}
+                                  onClick={() => queueScriptRun(item)}
+                                  aria-label="运行脚本"
+                                  title="运行"
+                                  disabled={savingScripts}
+                                >
                                   <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path fill="currentColor" d="M8 5v14l11-7-11-7Z" />
                                   </svg>
                                 </button>
-                                <button type="button" className="script-icon-btn" onClick={() => onEditScript(item)} aria-label="编辑脚本" title="编辑">
+                                <button
+                                  type="button"
+                                  className={`script-icon-btn ${actionFeedbackKey === `edit-${item.script}` ? 'is-pressed' : ''} ${editingScriptName === item.script ? 'is-working' : ''}`}
+                                  onClick={() => void onEditScript(item)}
+                                  aria-label="编辑脚本"
+                                  title="编辑"
+                                  disabled={savingScripts || editingScriptName === item.script}
+                                >
                                   <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path
                                       fill="currentColor"
@@ -717,7 +1096,7 @@ function App() {
                                     />
                                   </svg>
                                 </button>
-                                <button type="button" className="script-icon-btn script-icon-btn-danger" onClick={() => onDeleteScript(item)} aria-label="删除脚本" title="删除">
+                                <button type="button" className="script-icon-btn script-icon-btn-danger" onClick={() => requestDeleteScript(item)} aria-label="删除脚本" title="删除" disabled={savingScripts}>
                                   <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path
                                       fill="currentColor"
@@ -729,8 +1108,63 @@ function App() {
                             </li>
                           ))}
                         </ul>
-                        <button type="button" className="ghost-btn" disabled>
-                          + 添加脚本（后续开放）
+                        {pendingDeleteScript && (
+                          <div className="script-delete-confirm" role="alertdialog" aria-live="assertive" aria-label="确认删除脚本">
+                            <p>
+                              确认删除脚本 <strong>{pendingDeleteScript.script}</strong> 吗？
+                            </p>
+                            <span>将同时删除配置项与脚本文件。</span>
+                            <div className="script-create-actions">
+                              <button type="button" className="script-create-btn" onClick={cancelDeleteScript} disabled={savingScripts}>
+                                取消
+                              </button>
+                              <button type="button" className="script-create-btn script-delete-confirm-btn" onClick={() => void confirmDeleteScript()} disabled={savingScripts}>
+                                {savingScripts ? '删除中...' : '确认删除'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {showAddScriptForm && (
+                          <div className="script-create-panel">
+                            <label className="script-create-field">
+                              <span>脚本文件名</span>
+                              <input
+                                className="script-create-input"
+                                type="text"
+                                value={newScriptName}
+                                placeholder="如 task.py / task.cpp / task.js / task.java"
+                                disabled={savingScripts}
+                                onChange={(event) => setNewScriptName(event.target.value)}
+                              />
+                            </label>
+                            <label className="script-create-field">
+                              <span>显示名称</span>
+                              <input
+                                className="script-create-input"
+                                type="text"
+                                value={newScriptLabel}
+                                placeholder="可留空，默认使用文件名"
+                                disabled={savingScripts}
+                                onChange={(event) => setNewScriptLabel(event.target.value)}
+                              />
+                            </label>
+                            <div className="script-create-actions">
+                              <button type="button" className="script-create-btn" onClick={cancelAddScript} disabled={savingScripts}>
+                                取消
+                              </button>
+                              <button type="button" className="script-create-btn script-create-btn-primary" onClick={() => void onAddScript()} disabled={savingScripts}>
+                                {savingScripts ? '创建中...' : '创建并编辑'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={showAddScriptForm ? cancelAddScript : startAddScript}
+                          disabled={savingScripts}
+                        >
+                          {showAddScriptForm ? '取消新增' : '+ 添加脚本'}
                         </button>
                       </section>
 

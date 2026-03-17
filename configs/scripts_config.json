@@ -7,6 +7,10 @@
     {
       "label": "运行失败脚本",
       "script": "mock_error.py"
+    },
+    {
+      "label": "图片加水印",
+      "script": "watermark.py"
     }
   ]
 }
