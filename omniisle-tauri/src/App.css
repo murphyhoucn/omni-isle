@@ -523,6 +523,11 @@ div.log-box::-webkit-scrollbar-corner {
   background: linear-gradient(135deg, rgba(90, 187, 226, 0.5), rgba(59, 136, 186, 0.55));
 }
 
+.switch-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .switch-thumb {
   width: 22px;
   height: 22px;

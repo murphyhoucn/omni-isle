@@ -1,0 +1,6 @@
+{
+  "system_integration": {
+    "auto_start_enabled": false,
+    "context_menu_enabled": false
+  }
+}

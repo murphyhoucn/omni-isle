@@ -8,6 +8,10 @@ use std::thread;
 use tauri::Emitter;
 use tauri::Manager;
 #[cfg(target_os = "windows")]
+use winreg::enums::HKEY_CURRENT_USER;
+#[cfg(target_os = "windows")]
+use winreg::RegKey;
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::POINT;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::RECT;
@@ -39,6 +43,17 @@ struct ScriptConfigFile {
   scripts: Vec<ScriptMenuItem>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct SystemIntegrationConfig {
+  auto_start_enabled: bool,
+  context_menu_enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AppConfigFile {
+  system_integration: SystemIntegrationConfig,
+}
+
 #[derive(Serialize, Clone)]
 struct StartupJob {
   script: String,
@@ -53,6 +68,15 @@ struct AppState {
 struct ScriptLogEvent {
   stream: String,
   line: String,
+}
+
+fn default_app_config() -> AppConfigFile {
+  AppConfigFile {
+    system_integration: SystemIntegrationConfig {
+      auto_start_enabled: false,
+      context_menu_enabled: false,
+    },
+  }
 }
 
 fn resolve_script_path(script_name: &str) -> Result<PathBuf, String> {
@@ -81,6 +105,204 @@ fn resolve_script_config_path() -> Result<PathBuf, String> {
   }
 
   Err("未找到脚本配置文件 configs/scripts_config.json".to_string())
+}
+
+fn resolve_configs_dir() -> Result<PathBuf, String> {
+  let cwd = std::env::current_dir().map_err(|e| format!("无法读取当前目录: {e}"))?;
+  let candidate_roots = vec![cwd.clone(), cwd.join(".."), cwd.join("..").join("..")];
+
+  for root in candidate_roots {
+    let candidate = root.join("configs");
+    if candidate.exists() && candidate.is_dir() {
+      return Ok(candidate);
+    }
+  }
+
+  Err("未找到 configs 目录".to_string())
+}
+
+fn resolve_app_config_path() -> Result<PathBuf, String> {
+  Ok(resolve_configs_dir()?.join("app_configs.json"))
+}
+
+fn load_script_catalog_from_file() -> Result<Vec<ScriptMenuItem>, String> {
+  let config_path = resolve_script_config_path()?;
+  let raw = std::fs::read_to_string(&config_path)
+    .map_err(|e| format!("读取脚本配置失败: {e}"))?;
+  let parsed: ScriptConfigFile =
+    serde_json::from_str(&raw).map_err(|e| format!("解析脚本配置失败: {e}"))?;
+
+  let mut items = Vec::<ScriptMenuItem>::new();
+  for item in parsed.scripts {
+    let label = item.label.trim().to_string();
+    let script = item.script.trim().to_string();
+    if !label.is_empty() && !script.is_empty() {
+      items.push(ScriptMenuItem { label, script });
+    }
+  }
+
+  if items.is_empty() {
+    return Err("脚本配置为空，请在 configs/scripts_config.json 中添加 scripts 项".to_string());
+  }
+
+  Ok(items)
+}
+
+fn load_or_init_app_config() -> Result<AppConfigFile, String> {
+  let config_path = resolve_app_config_path()?;
+
+  if !config_path.exists() {
+    let initial = default_app_config();
+    save_app_config(&initial)?;
+    return Ok(initial);
+  }
+
+  let raw = std::fs::read_to_string(&config_path)
+    .map_err(|e| format!("读取应用配置失败: {e}"))?;
+  serde_json::from_str::<AppConfigFile>(&raw).map_err(|e| format!("解析应用配置失败: {e}"))
+}
+
+fn save_app_config(config: &AppConfigFile) -> Result<(), String> {
+  let config_path = resolve_app_config_path()?;
+  let body =
+    serde_json::to_string_pretty(config).map_err(|e| format!("序列化应用配置失败: {e}"))?;
+  std::fs::write(&config_path, body).map_err(|e| format!("写入应用配置失败: {e}"))
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_script_id(script: &str) -> String {
+  let stem = Path::new(script)
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or("script")
+    .to_ascii_lowercase();
+
+  let mut out = String::new();
+  let mut last_dash = false;
+  for ch in stem.chars() {
+    let is_safe = ch.is_ascii_alphanumeric() || ch == '_' || ch == '-';
+    if is_safe {
+      out.push(ch);
+      last_dash = false;
+    } else if !last_dash {
+      out.push('-');
+      last_dash = true;
+    }
+  }
+
+  out.trim_matches('-').to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn apply_auto_start(enabled: bool) -> Result<(), String> {
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  let run_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+  let (run_key, _) = hkcu
+    .create_subkey(run_path)
+    .map_err(|e| format!("打开启动项注册表失败: {e}"))?;
+
+  if enabled {
+    let exe = std::env::current_exe().map_err(|e| format!("读取当前程序路径失败: {e}"))?;
+    let value = format!("\"{}\"", exe.to_string_lossy());
+    run_key
+      .set_value("OmniIsle", &value)
+      .map_err(|e| format!("写入开机启动失败: {e}"))?;
+  } else {
+    let _ = run_key.delete_value("OmniIsle");
+  }
+
+  Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn create_context_menu_root(
+  hkcu: &RegKey,
+  base_path: &str,
+  target_placeholder: &str,
+  exe: &str,
+  scripts: &[ScriptMenuItem],
+) -> Result<(), String> {
+  let (menu_key, _) = hkcu
+    .create_subkey(base_path)
+    .map_err(|e| format!("创建右键菜单根节点失败: {e}"))?;
+  menu_key
+    .set_value("MUIVerb", &"OmniIsle")
+    .map_err(|e| format!("写入 MUIVerb 失败: {e}"))?;
+  menu_key
+    .set_value("Icon", &exe)
+    .map_err(|e| format!("写入图标失败: {e}"))?;
+  menu_key
+    .set_value("SubCommands", &"")
+    .map_err(|e| format!("写入 SubCommands 失败: {e}"))?;
+
+  let shell_path = format!("{}\\shell", base_path);
+  let _ = hkcu
+    .create_subkey(&shell_path)
+    .map_err(|e| format!("创建 shell 子节点失败: {e}"))?;
+
+  let mut used_ids: Vec<String> = Vec::new();
+
+  for item in scripts {
+    let mut script_id = normalize_script_id(&item.script);
+    if script_id.is_empty() {
+      script_id = "script".to_string();
+    }
+
+    let base = script_id.clone();
+    let mut suffix = 2usize;
+    while used_ids.iter().any(|x| x == &script_id) {
+      script_id = format!("{}-{}", base, suffix);
+      suffix += 1;
+    }
+    used_ids.push(script_id.clone());
+
+    let action_path = format!("{}\\{}", shell_path, script_id);
+    let (action_key, _) = hkcu
+      .create_subkey(&action_path)
+      .map_err(|e| format!("创建菜单项失败: {e}"))?;
+    action_key
+      .set_value("MUIVerb", &item.label)
+      .map_err(|e| format!("写入菜单项名称失败: {e}"))?;
+
+    let command_path = format!("{}\\command", action_path);
+    let command = format!(
+      "\"{}\" --run-script \"{}\" --target \"{}\"",
+      exe, item.script, target_placeholder
+    );
+    let (command_key, _) = hkcu
+      .create_subkey(&command_path)
+      .map_err(|e| format!("创建命令项失败: {e}"))?;
+    command_key
+      .set_value("", &command)
+      .map_err(|e| format!("写入命令失败: {e}"))?;
+  }
+
+  Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn apply_context_menu(enabled: bool) -> Result<(), String> {
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  let file_root = "Software\\Classes\\*\\shell\\OmniIsle";
+  let dir_root = "Software\\Classes\\Directory\\shell\\OmniIsle";
+
+  let _ = hkcu.delete_subkey_all(file_root);
+  let _ = hkcu.delete_subkey_all(dir_root);
+
+  if !enabled {
+    return Ok(());
+  }
+
+  let scripts = load_script_catalog_from_file()?;
+  let exe = std::env::current_exe()
+    .map_err(|e| format!("读取当前程序路径失败: {e}"))?
+    .to_string_lossy()
+    .to_string();
+
+  create_context_menu_root(&hkcu, file_root, "%1", &exe, &scripts)?;
+  create_context_menu_root(&hkcu, dir_root, "%1", &exe, &scripts)?;
+
+  Ok(())
 }
 
 fn choose_python_executable() -> String {
@@ -188,26 +410,43 @@ fn take_startup_job(state: tauri::State<AppState>) -> Option<StartupJob> {
 
 #[tauri::command]
 fn get_script_catalog() -> Result<Vec<ScriptMenuItem>, String> {
-  let config_path = resolve_script_config_path()?;
-  let raw = std::fs::read_to_string(&config_path)
-    .map_err(|e| format!("读取脚本配置失败: {e}"))?;
-  let parsed: ScriptConfigFile =
-    serde_json::from_str(&raw).map_err(|e| format!("解析脚本配置失败: {e}"))?;
+  load_script_catalog_from_file()
+}
 
-  let mut items = Vec::<ScriptMenuItem>::new();
-  for item in parsed.scripts {
-    let label = item.label.trim().to_string();
-    let script = item.script.trim().to_string();
-    if !label.is_empty() && !script.is_empty() {
-      items.push(ScriptMenuItem { label, script });
-    }
+#[tauri::command]
+fn get_system_integration_config() -> Result<SystemIntegrationConfig, String> {
+  let config = load_or_init_app_config()?;
+  Ok(config.system_integration)
+}
+
+#[tauri::command]
+fn set_system_integration_config(
+  auto_start_enabled: bool,
+  context_menu_enabled: bool,
+) -> Result<SystemIntegrationConfig, String> {
+  #[cfg(target_os = "windows")]
+  {
+    apply_auto_start(auto_start_enabled)?;
+    apply_context_menu(context_menu_enabled)?;
   }
 
-  if items.is_empty() {
-    return Err("脚本配置为空，请在 configs/scripts_config.json 中添加 scripts 项".to_string());
+  #[cfg(not(target_os = "windows"))]
+  {
+    let _ = auto_start_enabled;
+    let _ = context_menu_enabled;
+    return Err("当前平台不支持系统集成设置".to_string());
   }
 
-  Ok(items)
+  let integration = SystemIntegrationConfig {
+    auto_start_enabled,
+    context_menu_enabled,
+  };
+  let config = AppConfigFile {
+    system_integration: integration.clone(),
+  };
+  save_app_config(&config)?;
+
+  Ok(integration)
 }
 
 #[tauri::command]
@@ -356,6 +595,8 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       run_demo_script,
       get_script_catalog,
+      get_system_integration_config,
+      set_system_integration_config,
       take_startup_job,
       sync_main_window_size
     ])

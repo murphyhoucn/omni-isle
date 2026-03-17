@@ -59,6 +59,11 @@ type QueueJob = {
   targetPath?: string
 }
 
+type SystemIntegrationConfig = {
+  auto_start_enabled: boolean
+  context_menu_enabled: boolean
+}
+
 type EnvConfigItem = {
   id: number
   name: string
@@ -100,6 +105,7 @@ function App() {
   const [activeJob, setActiveJob] = useState<QueueJob | null>(null)
   const [autoStartEnabled, setAutoStartEnabled] = useState(false)
   const [contextMenuEnabled, setContextMenuEnabled] = useState(false)
+  const [savingSystemIntegration, setSavingSystemIntegration] = useState(false)
   const [envConfigs, setEnvConfigs] = useState<EnvConfigItem[]>([
     { id: 1, name: 'PYTHON', value: 'python' },
     { id: 2, name: 'NODE', value: 'node' },
@@ -367,6 +373,27 @@ function App() {
     pushLog('info', `已从列表移除脚本: ${item.label} (${item.script})`)
   }
 
+  const saveSystemIntegration = async (nextAutoStart: boolean, nextContextMenu: boolean) => {
+    setSavingSystemIntegration(true)
+    try {
+      const result = await invoke<SystemIntegrationConfig>('set_system_integration_config', {
+        autoStartEnabled: nextAutoStart,
+        contextMenuEnabled: nextContextMenu,
+      })
+
+      setAutoStartEnabled(result.auto_start_enabled)
+      setContextMenuEnabled(result.context_menu_enabled)
+      pushLog(
+        'success',
+        `系统集成已更新: 开机自启动 ${result.auto_start_enabled ? '开启' : '关闭'}，右键菜单 ${result.context_menu_enabled ? '开启' : '关闭'}`,
+      )
+    } catch (error) {
+      pushLog('error', `系统集成设置失败: ${String(error)}`)
+    } finally {
+      setSavingSystemIntegration(false)
+    }
+  }
+
   const addEnvConfigRow = () => {
     const id = envRowIdRef.current
     envRowIdRef.current += 1
@@ -390,6 +417,20 @@ function App() {
     updateEnvConfigRow(row.id, { value: nextValue })
     pushLog('info', `已检索 ${row.name} 运行环境: ${nextValue}`)
   }
+
+  useEffect(() => {
+    const loadSystemIntegration = async () => {
+      try {
+        const config = await invoke<SystemIntegrationConfig>('get_system_integration_config')
+        setAutoStartEnabled(config.auto_start_enabled)
+        setContextMenuEnabled(config.context_menu_enabled)
+      } catch (error) {
+        pushLog('warn', `读取系统集成配置失败: ${String(error)}`)
+      }
+    }
+
+    void loadSystemIntegration()
+  }, [])
 
   useEffect(() => {
     if (busy || activeJob || queue.length === 0) {
@@ -488,10 +529,10 @@ function App() {
                               type="button"
                               className="switch-btn"
                               aria-pressed={autoStartEnabled}
-                              onClick={() => {
+                              disabled={savingSystemIntegration}
+                              onClick={async () => {
                                 const next = !autoStartEnabled
-                                setAutoStartEnabled(next)
-                                pushLog('info', `开机自启动: ${next ? '开启' : '关闭'}（预览态）`)
+                                await saveSystemIntegration(next, contextMenuEnabled)
                               }}
                             >
                               <span className="switch-thumb" />
@@ -503,10 +544,10 @@ function App() {
                               type="button"
                               className="switch-btn"
                               aria-pressed={contextMenuEnabled}
-                              onClick={() => {
+                              disabled={savingSystemIntegration}
+                              onClick={async () => {
                                 const next = !contextMenuEnabled
-                                setContextMenuEnabled(next)
-                                pushLog('info', `右键菜单栏: ${next ? '开启' : '关闭'}（预览态）`)
+                                await saveSystemIntegration(autoStartEnabled, next)
                               }}
                             >
                               <span className="switch-thumb" />
