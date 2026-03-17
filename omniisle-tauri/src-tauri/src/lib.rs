@@ -17,6 +17,8 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
 
 #[derive(Serialize)]
 struct ScriptRunResult {
@@ -308,6 +310,41 @@ fn run_demo_script(
   })
 }
 
+#[tauri::command]
+fn sync_main_window_size(window: tauri::WebviewWindow, mode: String) {
+    let (width, height) = match mode.as_str() {
+        "collapsed" => (700.0, 80.0),
+        "expanded" => (700.0, 380.0),
+        "settings" => (700.0, 520.0),
+        _ => (700.0, 520.0)
+    };
+
+    if let Ok(scale_factor) = window.scale_factor() {
+        let physical_width = (width * scale_factor).round() as u32;
+        let physical_height = (height * scale_factor).round() as u32;
+
+        #[cfg(target_os = "windows")]
+        if let Ok(hwnd) = window.hwnd() {
+            unsafe {
+                SetWindowPos(
+                    hwnd.0 as _,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    physical_width as i32,
+                    physical_height as i32,
+                    SWP_NOZORDER | SWP_NOACTIVATE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE,
+                );
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = window.set_size(tauri::PhysicalSize::new(physical_width, physical_height));
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let startup_job = parse_startup_job_from_args();
@@ -319,7 +356,8 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       run_demo_script,
       get_script_catalog,
-      take_startup_job
+      take_startup_job,
+      sync_main_window_size
     ])
     .setup(|app| {
       if let Some(main_window) = app.get_webview_window("main") {

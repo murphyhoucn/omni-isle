@@ -155,6 +155,21 @@ function App() {
     logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logs])
 
+  useEffect(() => {
+    if (viewMode === 'settings') {
+      void invoke('sync_main_window_size', { mode: 'settings' })
+      return
+    }
+    if (wide) {
+      void invoke('sync_main_window_size', { mode: 'expanded' })
+    } else {
+      const timer = setTimeout(() => {
+        void invoke('sync_main_window_size', { mode: 'collapsed' })
+      }, 400) // Wait for shrink animation to finish before shrinking OS window
+      return () => clearTimeout(timer)
+    }
+  }, [viewMode, wide])
+
   const pushLog = (level: LogLevel, text: string) => {
     const id = logIdRef.current
     logIdRef.current += 1
@@ -325,17 +340,21 @@ function App() {
           <AnimatePresence>
             {panelVisible && (
               <motion.div
+                layout
                 className="island-panel"
-                initial={{ opacity: 0, height: 0, y: -2 }}
-                animate={{ opacity: 1, height: 'auto', y: 0 }}
-                exit={{ opacity: 0, height: 0, y: -1 }}
-                transition={{ duration: 0.14 }}
+                initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                animate={{ opacity: 1, height: 'auto', scale: 1 }}
+                exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
+                style={{ overflow: 'hidden' }}
               >
-                <AnimatePresence mode="wait" initial={false}>
-                  {viewMode === 'settings' ? (
-                    <motion.section
-                      key="panel-settings"
-                      className="panel-settings-view"
+                <div style={{ padding: '14px', position: 'relative' }}>
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {viewMode === 'settings' ? (
+                      <motion.section
+                        layout
+                        key="panel-settings"
+                        className="panel-settings-view"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
@@ -485,6 +504,7 @@ function App() {
                     </motion.section>
                   )}
                 </AnimatePresence>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
