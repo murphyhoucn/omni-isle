@@ -62,11 +62,11 @@
   position: relative;
   isolation: isolate;
   background:
-    linear-gradient(145deg, rgba(17, 39, 56, 0.48), rgba(7, 20, 32, 0.56)),
-    radial-gradient(120% 150% at 10% 0%, rgba(80, 172, 224, 0.12), transparent 58%);
-  border: 0;
+    linear-gradient(145deg, rgba(12, 28, 42, 0.82), rgba(4, 12, 20, 0.88)),
+    radial-gradient(120% 150% at 10% 0%, rgba(80, 172, 224, 0.08), transparent 58%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(24px) saturate(132%);
-  box-shadow: 0 14px 48px rgba(2, 8, 14, 0.5);
+  box-shadow: 0 14px 48px rgba(0, 0, 0, 0.6);
   overflow: hidden;
   will-change: width;
 }
@@ -111,8 +111,8 @@
   width: 30px;
   height: 30px;
   border-radius: 10px;
-  border: 1px solid rgba(203, 231, 248, 0.26);
-  background: linear-gradient(180deg, rgba(112, 188, 232, 0.22), rgba(45, 110, 154, 0.22));
+  border: 1px solid rgba(203, 231, 248, 0.08);
+  background: linear-gradient(180deg, rgba(60, 110, 140, 0.3), rgba(30, 70, 100, 0.3));
   color: #dceffc;
   display: grid;
   place-items: center;
@@ -122,7 +122,7 @@
 
 .settings-entry:hover {
   transform: translateY(-1px);
-  background: linear-gradient(180deg, rgba(129, 202, 243, 0.3), rgba(59, 125, 171, 0.3));
+  background: linear-gradient(180deg, rgba(70, 130, 160, 0.4), rgba(40, 90, 120, 0.4));
 }
 
 .settings-entry svg {
@@ -268,9 +268,9 @@ section.panel-settings-view::-webkit-scrollbar-thumb {
 .log-box {
   margin-top: 10px;
   background:
-    linear-gradient(180deg, rgba(5, 14, 22, 0.62), rgba(4, 10, 17, 0.68)),
-    radial-gradient(160% 130% at 0% 0%, rgba(95, 183, 230, 0.08), transparent 70%);
-  border: 1px solid rgba(190, 224, 246, 0.18);
+    linear-gradient(180deg, rgba(3, 8, 14, 0.85), rgba(2, 5, 10, 0.9)),
+    radial-gradient(160% 130% at 0% 0%, rgba(95, 183, 230, 0.04), transparent 70%);
+  border: 1px solid rgba(190, 224, 246, 0.05);
   border-radius: 12px;
   min-height: 130px;
   max-height: 220px;
@@ -386,8 +386,9 @@ div.log-box::-webkit-scrollbar-corner {
   width: min(92vw, 620px);
   border-radius: 16px;
   padding: 14px 16px;
-  background: rgba(8, 20, 31, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(5, 12, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   z-index: 1;
 }
 
@@ -407,14 +408,14 @@ div.log-box::-webkit-scrollbar-corner {
   width: min(92vw, 860px);
   margin-top: 10px;
   border-radius: 20px;
-  border: 1px solid rgba(196, 228, 246, 0.24);
+  border: 1px solid rgba(196, 228, 246, 0.06);
   background:
-    linear-gradient(150deg, rgba(16, 38, 56, 0.54), rgba(8, 22, 34, 0.6)),
-    radial-gradient(130% 120% at 0% 0%, rgba(79, 172, 224, 0.14), transparent 66%);
+    linear-gradient(150deg, rgba(12, 28, 42, 0.85), rgba(4, 12, 20, 0.9)),
+    radial-gradient(130% 120% at 0% 0%, rgba(79, 172, 224, 0.08), transparent 66%);
   backdrop-filter: blur(22px) saturate(130%);
   box-shadow:
-    0 18px 54px rgba(2, 8, 14, 0.5),
-    inset 0 1px 0 rgba(224, 243, 255, 0.2);
+    0 18px 54px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(224, 243, 255, 0.08);
   padding: 16px;
   display: grid;
   gap: 12px;
@@ -435,8 +436,8 @@ div.log-box::-webkit-scrollbar-corner {
 }
 
 .back-btn {
-  border: 1px solid rgba(188, 226, 248, 0.28);
-  background: rgba(12, 35, 52, 0.52);
+  border: 1px solid rgba(188, 226, 248, 0.08);
+  background: rgba(8, 24, 38, 0.85);
   color: #d6eaf8;
   border-radius: 10px;
   width: 34px;
@@ -454,10 +455,10 @@ div.log-box::-webkit-scrollbar-corner {
 
 .settings-card {
   border-radius: 14px;
-  border: 1px solid rgba(189, 223, 242, 0.2);
+  border: 1px solid rgba(189, 223, 242, 0.05);
   background:
-    linear-gradient(180deg, rgba(7, 18, 28, 0.58), rgba(5, 13, 22, 0.64)),
-    radial-gradient(120% 120% at 100% 0%, rgba(255, 184, 108, 0.08), transparent 70%);
+    linear-gradient(180deg, rgba(6, 14, 22, 0.85), rgba(2, 6, 12, 0.90)),
+    radial-gradient(120% 120% at 100% 0%, rgba(255, 184, 108, 0.05), transparent 70%);
   padding: 14px;
 }
 
@@ -486,7 +487,7 @@ div.log-box::-webkit-scrollbar-corner {
   width: 54px;
   height: 30px;
   border-radius: 999px;
-  background: rgba(158, 178, 194, 0.26);
+  background: rgba(158, 178, 194, 0.15);
   padding: 4px;
   display: flex;
   align-items: center;
@@ -554,8 +555,8 @@ ul.script-list::-webkit-scrollbar-button {
   gap: 8px;
   padding: 7px 8px;
   border-radius: 10px;
-  background: rgba(6, 17, 26, 0.65);
-  border: 1px solid rgba(182, 220, 244, 0.14);
+  background: rgba(4, 10, 14, 0.85);
+  border: 1px solid rgba(182, 220, 244, 0.05);
   min-height: 52px;
 }
 
@@ -592,9 +593,9 @@ ul.script-list::-webkit-scrollbar-button {
 
 .script-icon-btn,
 .ghost-btn {
-  border: 1px solid rgba(187, 222, 244, 0.22);
+  border: 1px solid rgba(187, 222, 244, 0.05);
   border-radius: 8px;
-  background: rgba(13, 31, 45, 0.66);
+  background: rgba(8, 18, 28, 0.85);
   color: #bdd4e4;
   height: 30px;
   width: 30px;
@@ -653,9 +654,9 @@ ul.script-list::-webkit-scrollbar-button {
   justify-content: center;
   gap: 0;
   text-decoration: none;
-  border: 1px solid rgba(193, 227, 247, 0.24);
+  border: 1px solid rgba(193, 227, 247, 0.05);
   border-radius: 8px;
-  background: rgba(12, 31, 46, 0.58);
+  background: rgba(8, 18, 28, 0.85);
   color: #dbedfb;
   height: 24px;
   width: 24px;
