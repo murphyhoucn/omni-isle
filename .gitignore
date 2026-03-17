@@ -1,0 +1,31 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs and temp
+*.log
+*.tmp
+*.swp
+
+# Root/local helper caches
+.npm-cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+
+# Tauri / Rust build outputs
+target/
+
+# Project-specific nested caches
+omniisle-tauri/.npm-cache/
+omniisle-tauri/src-tauri/.npm-cache/

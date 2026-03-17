@@ -1,0 +1,12 @@
+{
+  "scripts": [
+    {
+      "label": "运行成功脚本",
+      "script": "mock_success.py"
+    },
+    {
+      "label": "运行失败脚本",
+      "script": "mock_error.py"
+    }
+  ]
+}
