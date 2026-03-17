@@ -127,8 +127,8 @@ fn default_idle_hide_seconds() -> u32 {
 
 fn normalize_idle_hide_seconds(seconds: u32) -> Result<u32, String> {
   match seconds {
-    0 | 30 | 60 | 120 => Ok(seconds),
-    _ => Err("自动隐藏时长仅支持 0/30/60/120 秒".to_string()),
+    0 | 5 | 10 | 30 | 60 | 120 => Ok(seconds),
+    _ => Err("自动隐藏时长仅支持 0/5/10/30/60/120 秒".to_string()),
   }
 }
 

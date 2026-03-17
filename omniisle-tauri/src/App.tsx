@@ -148,7 +148,8 @@ function App() {
   const openTimer = useRef<number | null>(null) // 打开定时器
   const closeTimer = useRef<number | null>(null) // 关闭定时器
   const actionFeedbackTimer = useRef<number | null>(null) // 操作反馈定时器
-  const idleHideTimer = useRef<number | null>(null) // 无交互自动隐藏定时器
+  const lastInteractionMsRef = useRef(Date.now()) // 最近一次交互时间戳
+  const idleHideInProgressRef = useRef(false) // 防止并发触发隐藏
   const justFinishedRunRef = useRef(false) // 标记刚刚完成了一次任务运行
 
 
@@ -181,36 +182,31 @@ function App() {
     }
   }
 
-  const clearIdleHideTimer = () => {
-    if (idleHideTimer.current) {
-      window.clearTimeout(idleHideTimer.current)
-      idleHideTimer.current = null
-    }
+  const markInteraction = () => {
+    lastInteractionMsRef.current = Date.now()
+    justFinishedRunRef.current = false
   }
 
   const hideWindowByIdle = async () => {
+    if (idleHideInProgressRef.current || !windowVisible) {
+      return
+    }
+    idleHideInProgressRef.current = true
+    logToFile('INFO', `idle auto-hide triggered: ${idleHideSeconds}s`)
     closeIsland()
     try {
+      // Give the collapse animation a brief moment before hiding the native window.
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 120)
+      })
       await getCurrentWindow().hide()
       setWindowVisible(false)
       pushLog('info', '长时间无交互，已自动隐藏界面（托盘常驻）')
-    } catch {
-      // ignore hide failures
+    } catch (error) {
+      logToFile('ERROR', `idle auto-hide hide() failed: ${String(error)}`)
+    } finally {
+      idleHideInProgressRef.current = false
     }
-  }
-
-  const resetIdleHideTimer = (postRun = false) => {
-    clearIdleHideTimer()
-    if (busy || !windowVisible || idleHideSeconds <= 0) {
-      return
-    }
-    const delaySecs = postRun
-      ? Math.min(POST_RUN_HIDE_SECONDS, idleHideSeconds)
-      : idleHideSeconds
-    idleHideTimer.current = window.setTimeout(() => {
-      idleHideTimer.current = null
-      void hideWindowByIdle()
-    }, delaySecs * 1000)
   }
 
   const saveIdleHideSeconds = async (nextSeconds: number) => {
@@ -220,11 +216,8 @@ function App() {
         idleHideSeconds: nextSeconds,
       })
       setIdleHideSeconds(saved)
-      if (saved === 0) {
-        clearIdleHideTimer()
-      } else {
-        resetIdleHideTimer()
-      }
+      lastInteractionMsRef.current = Date.now()
+      justFinishedRunRef.current = false
       pushLog('success', `自动隐藏已更新: ${saved === 0 ? '永不自动隐藏' : `${saved} 秒`}`)
     } catch (error) {
       const errMsg = `保存自动隐藏设置失败: ${String(error)}`
@@ -251,11 +244,11 @@ function App() {
   const openIsland = () => {
     clearTimers()
     setWindowVisible(true)
+    lastInteractionMsRef.current = Date.now()
     setWide(true)
     openTimer.current = window.setTimeout(() => {
       setShowPanel(true)
       openTimer.current = null
-      resetIdleHideTimer()
     }, 85)
   }
 
@@ -331,7 +324,7 @@ function App() {
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
-      resetIdleHideTimer()
+      markInteraction()
       if (!panelRef.current) {
         return
       }
@@ -341,33 +334,53 @@ function App() {
     }
 
     const onKeyDown = () => {
-      resetIdleHideTimer()
+      markInteraction()
     }
 
     const onWheel = () => {
-      resetIdleHideTimer()
+      markInteraction()
     }
 
     if (windowVisible) {
       window.addEventListener('pointerdown', onPointerDown)
       window.addEventListener('keydown', onKeyDown)
       window.addEventListener('wheel', onWheel)
-      const isPostRun = justFinishedRunRef.current
-      justFinishedRunRef.current = false
-      resetIdleHideTimer(isPostRun)
     }
 
     return () => {
       window.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('wheel', onWheel)
-      clearIdleHideTimer()
     }
-  }, [windowVisible, showPanel, wide, viewMode, busy, idleHideSeconds])
+  }, [windowVisible])
+
+  useEffect(() => {
+    if (!windowVisible || idleHideSeconds <= 0) {
+      return
+    }
+
+    const check = window.setInterval(() => {
+      if (busy || idleHideInProgressRef.current) {
+        return
+      }
+
+      const limitSecs = justFinishedRunRef.current
+        ? Math.min(POST_RUN_HIDE_SECONDS, idleHideSeconds)
+        : idleHideSeconds
+      const elapsedMs = Date.now() - lastInteractionMsRef.current
+      if (elapsedMs >= limitSecs * 1000) {
+        justFinishedRunRef.current = false
+        void hideWindowByIdle()
+      }
+    }, 500)
+
+    return () => {
+      window.clearInterval(check)
+    }
+  }, [windowVisible, busy, idleHideSeconds])
 
   useEffect(() => () => {
     clearTimers()
-    clearIdleHideTimer()
   }, [])
 
   useEffect(() => {
@@ -592,6 +605,7 @@ function App() {
       if (unlisten) {
         unlisten()
       }
+      lastInteractionMsRef.current = Date.now()
       justFinishedRunRef.current = true
       setBusy(false)
       setActiveJob(null)
