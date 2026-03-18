@@ -145,7 +145,7 @@ def _default_exe_path(repo_root: Path) -> Path:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
-    default_config = repo_root / "configs" / "scripts_config.json"
+    default_config = repo_root / "dev-configs" / "scripts_configs.json"
     default_exe = _default_exe_path(repo_root)
 
     parser = argparse.ArgumentParser(description="Install/uninstall OmniIsle right-click menu.")

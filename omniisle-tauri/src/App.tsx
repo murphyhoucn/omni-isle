@@ -122,6 +122,7 @@ function App() {
   const [scriptItems, setScriptItems] = useState<ScriptMenuItem[]>([]) // 脚本项目列表
   const [busy, setBusy] = useState(false) // 是否忙碌状态
   const [savingScripts, setSavingScripts] = useState(false) // 是否正在保存脚本
+  const [refreshingScripts, setRefreshingScripts] = useState(false) // 是否正在刷新脚本列表
   const [queue, setQueue] = useState<QueueJob[]>([]) // 任务队列
   const [activeJob, setActiveJob] = useState<QueueJob | null>(null) // 当前活动任务
   const [autoStartEnabled, setAutoStartEnabled] = useState(false) // 是否启用自启动
@@ -130,8 +131,7 @@ function App() {
   const [savingEnvConfigs, setSavingEnvConfigs] = useState(false) // 是否正在保存环境配置
   const [savingIdleHide, setSavingIdleHide] = useState(false) // 是否正在保存自动隐藏设置
   const [savingDataDirectory, setSavingDataDirectory] = useState(false) // 是否正在保存数据目录
-  const [openingConfigs, setOpeningConfigs] = useState(false) // 是否正在打开 configs 文件夹
-  const [openingLogs, setOpeningLogs] = useState(false) // 是否正在打开 logs 文件夹
+  const [openingUserDataFolder, setOpeningUserDataFolder] = useState(false) // 是否正在打开用户数据目录
   const [pickingDataDirectory, setPickingDataDirectory] = useState(false) // 是否正在选择数据目录
   const [idleHideSeconds, setIdleHideSeconds] = useState(60) // 自动隐藏秒数，0=永不隐藏
   const [dataDirectoryInput, setDataDirectoryInput] = useState('') // 数据目录输入值
@@ -468,38 +468,50 @@ function App() {
     scriptItemsRef.current = scriptItems
   }, [scriptItems])
 
-  useEffect(() => {
-    const queueStartupJob = async (catalog: ScriptMenuItem[]) => {
-      try {
-        scriptItemsRef.current = catalog
-        const consumed = await consumePendingStartupJob('右键触发入队')
-        if (!consumed) {
-          return
-        }
-      } catch {
-        pushLog('warn', '未能读取启动参数任务，继续待机')
+  const queueStartupJob = async (catalog: ScriptMenuItem[]) => {
+    try {
+      scriptItemsRef.current = catalog
+      const consumed = await consumePendingStartupJob('右键触发入队')
+      if (!consumed) {
+        return
       }
+    } catch {
+      pushLog('warn', '未能读取启动参数任务，继续待机')
+    }
+  }
+
+  const reloadScriptCatalog = async (withStartupQueue = false) => {
+    let catalog: ScriptMenuItem[] = []
+
+    try {
+      const items = await invoke<ScriptMenuItem[]>('get_script_catalog')
+      if (Array.isArray(items)) {
+        setScriptItems(items)
+        catalog = items
+      }
+    } catch (error) {
+      const errMsg = `读取脚本配置失败: ${String(error)}`
+      pushLog('warn', errMsg)
+      logToFile('WARN', errMsg)
     }
 
-    const loadScriptCatalog = async () => {
-      let catalog: ScriptMenuItem[] = []
-
-      try {
-        const items = await invoke<ScriptMenuItem[]>('get_script_catalog')
-        if (Array.isArray(items)) {
-          setScriptItems(items)
-          catalog = items
-        }
-      } catch (error) {
-        const errMsg = `读取脚本配置失败: ${String(error)}`
-        pushLog('warn', errMsg)
-        logToFile('WARN', errMsg)
-      }
-
+    if (withStartupQueue) {
       await queueStartupJob(catalog)
     }
+  }
 
-    void loadScriptCatalog()
+  const refreshScriptCatalog = async () => {
+    setRefreshingScripts(true)
+    try {
+      await reloadScriptCatalog(false)
+      pushLog('success', '脚本列表已刷新，右键菜单已同步更新')
+    } finally {
+      setRefreshingScripts(false)
+    }
+  }
+
+  useEffect(() => {
+    void reloadScriptCatalog(true)
   }, [])
 
   const resolveEnvExecutable = (envNames: string | string[], fallback: string) => {
@@ -518,7 +530,7 @@ function App() {
       return {
         runtime: 'Python',
         executable: resolveEnvExecutable('PYTHON', 'python'),
-        action: `执行脚本: configs/scripts/${scriptName}`,
+        action: `执行脚本: scripts/${scriptName}`,
       }
     }
 
@@ -526,7 +538,7 @@ function App() {
       return {
         runtime: 'Node.js',
         executable: resolveEnvExecutable('NODE', 'node'),
-        action: `执行脚本: configs/scripts/${scriptName}`,
+        action: `执行脚本: scripts/${scriptName}`,
       }
     }
 
@@ -534,7 +546,7 @@ function App() {
       return {
         runtime: 'Java (javac -> java)',
         executable: resolveEnvExecutable('JAVA', 'java'),
-        action: `编译并运行: configs/scripts/${scriptName}`,
+        action: `编译并运行: scripts/${scriptName}`,
       }
     }
 
@@ -542,14 +554,14 @@ function App() {
       return {
         runtime: 'GCC/G++',
         executable: resolveEnvExecutable(['GCC/G++', 'GCC'], 'gcc'),
-        action: `编译并运行: configs/scripts/${scriptName}`,
+        action: `编译并运行: scripts/${scriptName}`,
       }
     }
 
     return {
       runtime: '未知',
       executable: '-',
-      action: `尝试执行: configs/scripts/${scriptName}`,
+      action: `尝试执行: scripts/${scriptName}`,
     }
   }
 
@@ -768,7 +780,7 @@ function App() {
       }))
       setEnvConfigs(normalized)
       envRowIdRef.current = normalized.length + 1
-      pushLog('success', '环境配置已写入 configs/app_configs.json')
+      pushLog('success', '环境配置已写入用户主目录/.omniisle/app_configs.json')
     } catch (error) {
       const errMsg = `保存环境配置失败: ${String(error)}`
       pushLog('error', errMsg)
@@ -822,31 +834,17 @@ function App() {
     }
   }
 
-  const openConfigsFolder = async () => {
-    setOpeningConfigs(true)
+  const openUserDataFolder = async () => {
+    setOpeningUserDataFolder(true)
     try {
-      const folderPath = await invoke<string>('open_configs_folder')
-      pushLog('info', `已打开 configs 文件夹: ${folderPath}`)
+      const folderPath = await invoke<string>('open_user_data_folder')
+      pushLog('info', `已打开用户数据目录: ${folderPath}`)
     } catch (error) {
-      const errMsg = `打开 configs 文件夹失败: ${String(error)}`
+      const errMsg = `打开用户数据目录失败: ${String(error)}`
       pushLog('error', errMsg)
       logToFile('ERROR', errMsg)
     } finally {
-      setOpeningConfigs(false)
-    }
-  }
-
-  const openLogsFolder = async () => {
-    setOpeningLogs(true)
-    try {
-      const folderPath = await invoke<string>('open_logs_folder')
-      pushLog('info', `已打开 logs 文件夹: ${folderPath}`)
-    } catch (error) {
-      const errMsg = `打开 logs 文件夹失败: ${String(error)}`
-      pushLog('error', errMsg)
-      logToFile('ERROR', errMsg)
-    } finally {
-      setOpeningLogs(false)
+      setOpeningUserDataFolder(false)
     }
   }
 
@@ -986,6 +984,8 @@ function App() {
               }
             }}
             type="button"
+            aria-label={viewMode === 'settings' ? '返回主界面' : showPanel || wide ? '收起面板' : '展开面板'}
+            title={viewMode === 'settings' ? '返回主界面' : showPanel || wide ? '收起面板' : '展开面板'}
           >
             <span className="dot" />
               <span className="status-text">{viewMode === 'settings' ? '设置' : statusText}</span>              <span className="ghost">OmniIsle</span>
@@ -1019,6 +1019,7 @@ function App() {
                           className="back-btn"
                           onClick={() => setViewMode('island')}
                           aria-label="返回"
+                          title="返回主界面"
                         >
                           <svg viewBox="0 0 24 24" aria-hidden="true">
                             <path
@@ -1038,7 +1039,9 @@ function App() {
                             <button
                               type="button"
                               className="switch-btn"
+                              aria-label="切换开机自启动"
                               aria-pressed={autoStartEnabled}
+                              title={autoStartEnabled ? '关闭开机自启动' : '开启开机自启动'}
                               disabled={savingSystemIntegration}
                               onClick={async () => {
                                 const next = !autoStartEnabled
@@ -1053,7 +1056,9 @@ function App() {
                             <button
                               type="button"
                               className="switch-btn"
+                              aria-label="切换右键菜单栏"
                               aria-pressed={contextMenuEnabled}
+                              title={contextMenuEnabled ? '关闭右键菜单栏' : '开启右键菜单栏'}
                               disabled={savingSystemIntegration}
                               onClick={async () => {
                                 const next = !contextMenuEnabled
@@ -1085,37 +1090,19 @@ function App() {
                       <section className="settings-card panel-settings-card">
                         <div className="data-dir-head">
                           <div className="data-dir-title-wrap">
-                            <h2>应用数据目录</h2>
-                            <p>用于存放 configs 与 logs。默认路径在 AppData，可手动改到其他盘符。</p>
+                            <h2>用户数据目录</h2>
+                            <p>用于存放 scripts 与 logs。默认路径在 AppData，可手动改到其他盘符。</p>
                           </div>
                           <div className="data-dir-head-actions">
                             <button
                               type="button"
-                              className={`script-icon-btn ${actionFeedbackKey === 'open-configs' ? 'is-pressed' : ''}`}
-                              aria-label="打开 configs 文件夹"
-                              title="打开 configs 文件夹"
-                              disabled={openingConfigs || savingDataDirectory || pickingDataDirectory}
+                              className={`script-icon-btn ${actionFeedbackKey === 'open-user-data' ? 'is-pressed' : ''}`}
+                              aria-label="打开用户数据目录"
+                              title="打开用户数据目录"
+                              disabled={openingUserDataFolder || savingDataDirectory || pickingDataDirectory}
                               onClick={() => {
-                                flashActionFeedback('open-configs')
-                                void openConfigsFolder()
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path
-                                  fill="currentColor"
-                                  d="M22.7 19 13.6 9.9a5.5 5.5 0 0 0-1.5-6.8A5.5 5.5 0 0 0 5.4 1.5L9 5 6 8 2.5 4.5A5.5 5.5 0 0 0 4 11.2a5.5 5.5 0 0 0 6.8 1.5l9.1 9.1a1 1 0 0 0 1.4 0l1.4-1.4a1 1 0 0 0 0-1.4Z"
-                                />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              className={`script-icon-btn ${actionFeedbackKey === 'open-logs' ? 'is-pressed' : ''}`}
-                              aria-label="打开 logs 文件夹"
-                              title="打开 logs 文件夹"
-                              disabled={openingLogs || savingDataDirectory || pickingDataDirectory}
-                              onClick={() => {
-                                flashActionFeedback('open-logs')
-                                void openLogsFolder()
+                                flashActionFeedback('open-user-data')
+                                void openUserDataFolder()
                               }}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1233,6 +1220,8 @@ function App() {
                           type="button"
                           className="ghost-btn"
                           onClick={addEnvConfigRow}
+                          aria-label="添加运行环境"
+                          title="添加运行环境"
                           disabled={savingEnvConfigs || pickingEnvRowId !== null}
                         >
                           + 添加运行环境
@@ -1240,7 +1229,24 @@ function App() {
                       </section>
 
                       <section className="settings-card panel-settings-card">
-                        <h2>脚本管理</h2>
+                        <div className="script-manage-head">
+                          <h2>脚本管理</h2>
+                          <button
+                            type="button"
+                            className={`script-icon-btn ${refreshingScripts ? 'is-working' : ''}`}
+                            aria-label="刷新脚本列表"
+                            title="刷新脚本列表并同步右键菜单"
+                            onClick={() => void refreshScriptCatalog()}
+                            disabled={savingScripts || refreshingScripts}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path
+                                fill="currentColor"
+                                d="M12 5a7 7 0 0 1 6.32 4H16a1 1 0 1 0 0 2h4.5A1.5 1.5 0 0 0 22 9.5V5a1 1 0 1 0-2 0v1.44A9 9 0 1 0 21 12a1 1 0 1 0-2 0 7 7 0 1 1-7-7Z"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                         <p>支持新增、编辑、删除；运行时根据脚本类型自动匹配运行环境。</p>
                         <ul className="script-list">
                           {scriptItems.length === 0 && (
@@ -1304,10 +1310,10 @@ function App() {
                             </p>
                             <span>将同时删除配置项与脚本文件。</span>
                             <div className="script-create-actions">
-                              <button type="button" className="script-create-btn" onClick={cancelDeleteScript} disabled={savingScripts}>
+                              <button type="button" className="script-create-btn" onClick={cancelDeleteScript} disabled={savingScripts} aria-label="取消删除脚本" title="取消删除脚本">
                                 取消
                               </button>
-                              <button type="button" className="script-create-btn script-delete-confirm-btn" onClick={() => void confirmDeleteScript()} disabled={savingScripts}>
+                              <button type="button" className="script-create-btn script-delete-confirm-btn" onClick={() => void confirmDeleteScript()} disabled={savingScripts} aria-label="确认删除脚本" title="确认删除脚本">
                                 {savingScripts ? '删除中...' : '确认删除'}
                               </button>
                             </div>
@@ -1338,10 +1344,10 @@ function App() {
                               />
                             </label>
                             <div className="script-create-actions">
-                              <button type="button" className="script-create-btn" onClick={cancelAddScript} disabled={savingScripts}>
+                              <button type="button" className="script-create-btn" onClick={cancelAddScript} disabled={savingScripts} aria-label="取消新增脚本" title="取消新增脚本">
                                 取消
                               </button>
-                              <button type="button" className="script-create-btn script-create-btn-primary" onClick={() => void onAddScript()} disabled={savingScripts}>
+                              <button type="button" className="script-create-btn script-create-btn-primary" onClick={() => void onAddScript()} disabled={savingScripts} aria-label="创建并编辑脚本" title="创建并编辑脚本">
                                 {savingScripts ? '创建中...' : '创建并编辑'}
                               </button>
                             </div>
@@ -1351,6 +1357,8 @@ function App() {
                           type="button"
                           className="ghost-btn"
                           onClick={showAddScriptForm ? cancelAddScript : startAddScript}
+                          aria-label={showAddScriptForm ? '取消新增脚本' : '添加脚本'}
+                          title={showAddScriptForm ? '取消新增脚本' : '添加脚本'}
                           disabled={savingScripts}
                         >
                           {showAddScriptForm ? '取消新增' : '+ 添加脚本'}
@@ -1374,6 +1382,7 @@ function App() {
                               type="button"
                               className="github-link compact"
                               aria-label="打开 Github 仓库"
+                              title="打开 Github 仓库"
                               onClick={() => void invoke('open_url', { url: GITHUB_REPO_URL })}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1404,6 +1413,7 @@ function App() {
                           openIsland()
                         }}
                         aria-label="进入设置"
+                        title="进入设置"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path

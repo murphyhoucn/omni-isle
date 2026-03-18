@@ -32,7 +32,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "../../configs"
+      "../../dev-configs"
     ],
     "icon": [
       "icons/32x32.png",

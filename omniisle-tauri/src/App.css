@@ -117,6 +117,20 @@ body.debug-body-bounds .stage {
   padding: 0 16px;
   cursor: pointer;
   position: relative;
+  transition: background-color 140ms ease, transform 120ms ease, box-shadow 160ms ease;
+}
+
+.island-pill:hover {
+  background: rgba(196, 228, 248, 0.06);
+}
+
+.island-pill:active {
+  transform: scale(0.995);
+}
+
+.island-pill:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(142, 201, 236, 0.38);
 }
 
 .island-pill > .status-text {
@@ -146,6 +160,15 @@ body.debug-body-bounds .stage {
 .settings-entry:hover {
   transform: translateY(-1px);
   background: linear-gradient(180deg, rgba(70, 130, 160, 0.4), rgba(40, 90, 120, 0.4));
+}
+
+.settings-entry:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+.settings-entry:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(112, 182, 225, 0.22);
 }
 
 .settings-entry svg {
@@ -469,6 +492,21 @@ div.log-box::-webkit-scrollbar-corner {
   display: grid;
   place-items: center;
   cursor: pointer;
+  transition: transform 120ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 160ms ease;
+}
+
+.back-btn:hover:not(:disabled) {
+  border-color: rgba(172, 215, 241, 0.34);
+  background: rgba(15, 33, 49, 0.92);
+}
+
+.back-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.96);
+}
+
+.back-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(108, 177, 221, 0.2);
 }
 
 .back-btn svg {
@@ -497,6 +535,36 @@ div.log-box::-webkit-scrollbar-corner {
   color: #aac2d3;
 }
 
+/* Static UI labels should not be text-selectable (desktop app feel). */
+.island-pill,
+.status-text,
+.ghost,
+.panel-head h1,
+.panel-head p,
+.settings-top h1,
+.settings-card h2,
+.settings-card p,
+.setting-tip,
+.about-lines p,
+.about-lines span,
+.about-lines strong {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Keep editable / copyable areas selectable. */
+.log-box,
+.log-box .log-line,
+.log-box .log-text,
+.data-dir-input,
+.env-value-input,
+.script-create-input,
+.script-name,
+.script-file {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .setting-row {
   margin-top: 10px;
   display: grid;
@@ -516,7 +584,11 @@ div.log-box::-webkit-scrollbar-corner {
   align-items: center;
   justify-content: flex-start;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, transform 120ms ease, box-shadow 140ms ease;
+}
+
+.switch-btn:hover:not(:disabled) {
+  box-shadow: 0 0 0 3px rgba(96, 166, 208, 0.16);
 }
 
 .switch-btn[aria-pressed='true'] {
@@ -526,6 +598,15 @@ div.log-box::-webkit-scrollbar-corner {
 .switch-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.switch-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.switch-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(111, 191, 234, 0.24);
 }
 
 .switch-thumb {
@@ -675,6 +756,7 @@ div.log-box::-webkit-scrollbar-corner {
   display: grid;
   place-items: center;
   cursor: pointer;
+  transition: transform 120ms ease, border-color 140ms ease, background-color 140ms ease, color 140ms ease, box-shadow 160ms ease;
 }
 
 .env-action-btn svg {
@@ -685,6 +767,16 @@ div.log-box::-webkit-scrollbar-corner {
 .env-action-btn:hover:not(:disabled) {
   border-color: rgba(137, 201, 235, 0.3);
   color: #eef7ff;
+}
+
+.env-action-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.94);
+  box-shadow: inset 0 0 0 1px rgba(135, 194, 228, 0.16);
+}
+
+.env-action-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(106, 177, 220, 0.2);
 }
 
 .env-action-btn-danger {
@@ -716,6 +808,17 @@ div.log-box::-webkit-scrollbar-corner {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgba(96, 178, 224, 0.56) rgba(5, 12, 20, 0.78);
+}
+
+.script-manage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.script-manage-head .script-icon-btn {
+  flex: 0 0 auto;
 }
 
 ul.script-list::-webkit-scrollbar {
@@ -861,6 +964,21 @@ ul.script-list::-webkit-scrollbar-button {
   padding: 0 10px;
 }
 
+.ghost-btn:hover:not(:disabled) {
+  border-color: rgba(187, 222, 244, 0.24);
+  background: rgba(15, 30, 43, 0.95);
+  color: #d8e8f5;
+}
+
+.ghost-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.96);
+}
+
+.ghost-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(112, 180, 222, 0.2);
+}
+
 .script-create-panel {
   margin-top: 10px;
   padding: 10px;
@@ -964,6 +1082,11 @@ ul.script-list::-webkit-scrollbar-button {
   transform: scale(0.96);
 }
 
+.script-create-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(105, 177, 223, 0.22);
+}
+
 .script-create-btn-primary {
   border-color: rgba(111, 187, 229, 0.44);
   background: linear-gradient(160deg, rgba(27, 83, 117, 0.9), rgba(17, 57, 84, 0.92));
@@ -1017,6 +1140,21 @@ ul.script-list::-webkit-scrollbar-button {
   cursor: pointer;
   font-family: inherit;
   box-sizing: border-box;
+  transition: transform 120ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 160ms ease;
+}
+
+.github-link:hover:not(:disabled) {
+  border-color: rgba(195, 227, 247, 0.26);
+  background: rgba(17, 34, 49, 0.95);
+}
+
+.github-link:active:not(:disabled) {
+  transform: translateY(1px) scale(0.95);
+}
+
+.github-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(117, 189, 233, 0.22);
 }
 
 .github-link svg {

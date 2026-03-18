@@ -1,0 +1,8 @@
+{
+  "scripts": [
+    {
+      "label": "hello world",
+      "script": "hello.py"
+    }
+  ]
+}

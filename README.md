@@ -42,7 +42,7 @@ Release executable is generated at:
 Install right-click menu (safe: HKCU only):
 
 ```powershell
-python tools/windows/context_menu_registry.py install --exe "omniisle-tauri\\src-tauri\\target\\release\\app.exe" --config "configs\\scripts_config.json"
+python tools/windows/context_menu_registry.py install --exe "omniisle-tauri\\src-tauri\\target\\release\\app.exe" --config "dev-configs\\scripts_configs.json"
 ```
 
 Remove right-click menu:
@@ -55,18 +55,18 @@ Notes:
 
 - Scope: `HKCU\\Software\\Classes\\...` (no machine-wide writes)
 - Windows 11 may place entries under `Show more options`
-- Script menu items come from `configs/scripts_config.json`
+- Script menu items come from `dev-configs/scripts_configs.json`
 
 ## Project Structure
 
 ```text
 OmniIsle/
-├─ configs/
-│  ├─ omniisle_demo.py
-│  ├─ scripts_config.json
+├─ dev-configs/
+│  ├─ app_jsons.json
+│  ├─ env_configs.json
+│  ├─ scripts_configs.json
 │  └─ scripts/
-│     ├─ mock_success.py
-│     └─ mock_error.py
+│     └─ hello.py
 ├─ omniisle-tauri/
 │  ├─ src/
 │  │  ├─ App.tsx

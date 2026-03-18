@@ -1,0 +1,8 @@
+{
+  "system_integration": {
+    "auto_start_enabled": false,
+    "context_menu_enabled": true,
+    "user_data_path": "C:\\Users\\cosmi\\AppData\\Local\\OmniIsle"
+  },
+  "idle_hide_seconds": 30
+}

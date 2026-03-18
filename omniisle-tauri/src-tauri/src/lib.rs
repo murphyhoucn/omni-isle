@@ -51,6 +51,8 @@ struct ScriptConfigFile {
 struct SystemIntegrationConfig {
   auto_start_enabled: bool,
   context_menu_enabled: bool,
+  #[serde(default = "default_user_data_path")]
+  user_data_path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -63,10 +65,16 @@ struct EnvironmentConfig {
 struct AppConfigFile {
   #[serde(default = "default_system_integration")]
   system_integration: SystemIntegrationConfig,
-  #[serde(default = "default_environments")]
-  environments: Vec<EnvironmentConfig>,
   #[serde(default = "default_idle_hide_seconds")]
   idle_hide_seconds: u32,
+  #[serde(default, rename = "environments", skip_serializing_if = "Vec::is_empty")]
+  legacy_environments: Vec<EnvironmentConfig>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EnvConfigFile {
+  #[serde(default = "default_environments")]
+  environments: Vec<EnvironmentConfig>,
 }
 
 #[derive(Serialize, Clone)]
@@ -97,7 +105,26 @@ fn default_system_integration() -> SystemIntegrationConfig {
   SystemIntegrationConfig {
     auto_start_enabled: false,
     context_menu_enabled: false,
+    user_data_path: default_user_data_path(),
   }
+}
+
+fn default_user_data_path() -> String {
+  #[cfg(target_os = "windows")]
+  {
+    if let Some(base) = std::env::var_os("LOCALAPPDATA") {
+      return PathBuf::from(base).join("OmniIsle").to_string_lossy().to_string();
+    }
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    if let Some(home) = std::env::var_os("HOME") {
+      return PathBuf::from(home).join(".omniisle").to_string_lossy().to_string();
+    }
+  }
+
+  "OmniIsle".to_string()
 }
 
 fn default_environments() -> Vec<EnvironmentConfig> {
@@ -124,13 +151,17 @@ fn default_environments() -> Vec<EnvironmentConfig> {
 fn default_app_config() -> AppConfigFile {
   AppConfigFile {
     system_integration: default_system_integration(),
-    environments: default_environments(),
     idle_hide_seconds: default_idle_hide_seconds(),
+    legacy_environments: Vec::new(),
   }
 }
 
 fn default_idle_hide_seconds() -> u32 {
   60
+}
+
+fn strip_utf8_bom(raw: &str) -> &str {
+  raw.trim_start_matches('\u{feff}')
 }
 
 fn normalize_idle_hide_seconds(seconds: u32) -> Result<u32, String> {
@@ -183,9 +214,14 @@ fn executable_candidate_roots() -> Result<Vec<PathBuf>, String> {
 
 fn first_existing_configs_dir(roots: &[PathBuf]) -> Option<PathBuf> {
   for root in roots {
-    let candidate = root.join("configs");
+    let candidate = root.join("dev-configs");
     if candidate.exists() && candidate.is_dir() {
       return Some(candidate);
+    }
+
+    let legacy_candidate = root.join("configs");
+    if legacy_candidate.exists() && legacy_candidate.is_dir() {
+      return Some(legacy_candidate);
     }
   }
 
@@ -194,9 +230,14 @@ fn first_existing_configs_dir(roots: &[PathBuf]) -> Option<PathBuf> {
 
 fn first_existing_resource_configs_dir(roots: &[PathBuf]) -> Option<PathBuf> {
   for root in roots {
-    let candidate = root.join("resources").join("configs");
+    let candidate = root.join("resources").join("dev-configs");
     if candidate.exists() && candidate.is_dir() {
       return Some(candidate);
+    }
+
+    let legacy_candidate = root.join("resources").join("configs");
+    if legacy_candidate.exists() && legacy_candidate.is_dir() {
+      return Some(legacy_candidate);
     }
   }
 
@@ -219,13 +260,40 @@ fn local_data_root() -> Result<PathBuf, String> {
   }
 }
 
+fn local_settings_root() -> Result<PathBuf, String> {
+  #[cfg(target_os = "windows")]
+  {
+    let base = std::env::var_os("USERPROFILE")
+      .ok_or_else(|| "未找到 USERPROFILE 环境变量".to_string())?;
+    return Ok(PathBuf::from(base).join(".omniisle"));
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    let home = std::env::var_os("HOME")
+      .ok_or_else(|| "未找到 HOME 环境变量".to_string())?;
+    Ok(PathBuf::from(home).join(".omniisle"))
+  }
+}
+
 fn data_root_pointer_path() -> Result<PathBuf, String> {
   Ok(local_data_root()?.join("data_root.txt"))
 }
 
-fn read_data_root_override() -> Option<PathBuf> {
-  let pointer = data_root_pointer_path().ok()?;
-  let raw = std::fs::read_to_string(pointer).ok()?;
+fn deprecated_settings_data_root_pointer_path() -> Result<PathBuf, String> {
+  Ok(local_settings_root()?.join("data_root.txt"))
+}
+
+fn executable_data_root_pointer_path() -> Result<PathBuf, String> {
+  let exe = std::env::current_exe().map_err(|e| format!("无法读取当前程序路径: {e}"))?;
+  let exe_dir = exe
+    .parent()
+    .ok_or_else(|| "无法解析当前程序目录".to_string())?;
+  Ok(exe_dir.join("omniisle_data_root.txt"))
+}
+
+fn read_data_root_override_from(path: &Path) -> Option<PathBuf> {
+  let raw = std::fs::read_to_string(path).ok()?;
   let trimmed = raw.trim();
   if trimmed.is_empty() {
     return None;
@@ -233,16 +301,61 @@ fn read_data_root_override() -> Option<PathBuf> {
   Some(PathBuf::from(trimmed))
 }
 
+fn read_data_root_override() -> Option<PathBuf> {
+  // Prefer the pointer located next to app executable; fallback to LocalAppData pointer.
+  if let Ok(pointer) = executable_data_root_pointer_path() {
+    if let Some(found) = read_data_root_override_from(&pointer) {
+      return Some(found);
+    }
+  }
+
+  if let Ok(pointer) = data_root_pointer_path() {
+    if let Some(found) = read_data_root_override_from(&pointer) {
+      return Some(found);
+    }
+  }
+
+  if let Ok(pointer) = deprecated_settings_data_root_pointer_path() {
+    if let Some(found) = read_data_root_override_from(&pointer) {
+      let _ = write_data_root_override(Some(&found));
+      let _ = std::fs::remove_file(pointer);
+      return Some(found);
+    }
+  }
+
+  None
+}
+
 fn write_data_root_override(path: Option<&Path>) -> Result<(), String> {
-  let pointer = data_root_pointer_path()?;
-  ensure_parent_dir(&pointer)?;
+  let local_pointer = data_root_pointer_path()?;
+  ensure_parent_dir(&local_pointer)?;
   match path {
     Some(value) => {
-      std::fs::write(&pointer, value.to_string_lossy().to_string())
+      std::fs::write(&local_pointer, value.to_string_lossy().to_string())
         .map_err(|e| format!("写入数据目录配置失败: {e}"))?;
     }
     None => {
-      let _ = std::fs::remove_file(&pointer);
+      let _ = std::fs::remove_file(&local_pointer);
+    }
+  }
+
+  // Remove deprecated pointer from settings directory so .omniisle only keeps app_configs.
+  if let Ok(deprecated_pointer) = deprecated_settings_data_root_pointer_path() {
+    let _ = std::fs::remove_file(&deprecated_pointer);
+  }
+
+  // Best-effort mirror pointer in executable directory so the app can self-discover
+  // even when startup context differs. Ignore failures on protected install paths.
+  if let Ok(exe_pointer) = executable_data_root_pointer_path() {
+    match path {
+      Some(value) => {
+        if ensure_parent_dir(&exe_pointer).is_ok() {
+          let _ = std::fs::write(&exe_pointer, value.to_string_lossy().to_string());
+        }
+      }
+      None => {
+        let _ = std::fs::remove_file(&exe_pointer);
+      }
     }
   }
   Ok(())
@@ -286,6 +399,18 @@ fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
   Ok(())
 }
 
+fn first_existing_file(candidates: &[PathBuf]) -> Option<PathBuf> {
+  candidates
+    .iter()
+    .find(|path| path.exists() && path.is_file())
+    .cloned()
+}
+
+fn source_config_file(source_configs: &Path, names: &[&str]) -> Option<PathBuf> {
+  let candidates: Vec<PathBuf> = names.iter().map(|name| source_configs.join(name)).collect();
+  first_existing_file(&candidates)
+}
+
 fn resolve_seed_source_configs_dir() -> Option<PathBuf> {
   if let Ok(workspace_roots) = workspace_candidate_roots() {
     if let Some(configs) = first_existing_configs_dir(&workspace_roots) {
@@ -301,55 +426,72 @@ fn resolve_seed_source_configs_dir() -> Option<PathBuf> {
   None
 }
 
-fn ensure_configs_seed_at(data_root: &Path, source_configs: Option<&Path>) -> Result<PathBuf, String> {
-  let runtime_configs = data_root.join("configs");
-  let runtime_scripts = runtime_configs.join("scripts");
-  std::fs::create_dir_all(&runtime_scripts).map_err(|e| format!("创建运行时配置目录失败: {e}"))?;
+fn ensure_settings_seed(source_configs: Option<&Path>) -> Result<PathBuf, String> {
+  let settings_root = local_settings_root()?;
+  std::fs::create_dir_all(&settings_root).map_err(|e| format!("创建基础配置目录失败: {e}"))?;
+
+  let app_config_path = settings_root.join("app_configs.json");
 
   if let Some(source_configs) = source_configs {
     let source_canonical = source_configs.canonicalize().ok();
-    let target_canonical = runtime_configs.canonicalize().ok();
-    let same_root = source_configs == runtime_configs
+    let target_canonical = settings_root.canonicalize().ok();
+    let same_root = source_configs == settings_root
       || (source_canonical.is_some() && source_canonical == target_canonical);
 
     if !same_root {
-      let source_scripts = source_configs.join("scripts");
-      if !runtime_configs.join("app_configs.json").exists() && source_configs.join("app_configs.json").exists() {
-        std::fs::copy(source_configs.join("app_configs.json"), runtime_configs.join("app_configs.json"))
+      if !app_config_path.exists() {
+        if let Some(source_app) = source_config_file(source_configs, &["app_jsons.json", "app_configs.json"]) {
+          std::fs::copy(source_app, &app_config_path)
           .map_err(|e| format!("初始化 app_configs.json 失败: {e}"))?;
-      }
-      if !runtime_configs.join("scripts_config.json").exists() && source_configs.join("scripts_config.json").exists() {
-        std::fs::copy(source_configs.join("scripts_config.json"), runtime_configs.join("scripts_config.json"))
-          .map_err(|e| format!("初始化 scripts_config.json 失败: {e}"))?;
-      }
-      if source_scripts.exists() && source_scripts.is_dir() {
-        copy_dir_recursive(&source_scripts, &runtime_scripts)?;
+        }
       }
     }
   }
 
-  if !runtime_configs.join("scripts_config.json").exists() {
-    let body = serde_json::to_string_pretty(&ScriptConfigFile { scripts: Vec::new() })
-      .map_err(|e| format!("初始化脚本配置失败: {e}"))?;
-    std::fs::write(runtime_configs.join("scripts_config.json"), body)
-      .map_err(|e| format!("写入脚本配置失败: {e}"))?;
+  if !app_config_path.exists() {
+    let body = serde_json::to_string_pretty(&default_app_config())
+      .map_err(|e| format!("初始化应用配置失败: {e}"))?;
+    std::fs::write(&app_config_path, body)
+      .map_err(|e| format!("写入应用配置失败: {e}"))?;
   }
 
-  Ok(runtime_configs)
+  Ok(settings_root)
+}
+
+fn ensure_scripts_seed_at(data_root: &Path) -> Result<PathBuf, String> {
+  let runtime_scripts = data_root.join("scripts");
+  std::fs::create_dir_all(&runtime_scripts).map_err(|e| format!("创建运行时脚本目录失败: {e}"))?;
+
+  Ok(runtime_scripts)
 }
 
 fn resolve_scripts_dir() -> Result<PathBuf, String> {
-  Ok(resolve_configs_dir()?.join("scripts"))
+  let (data_root, _) = resolve_active_data_root()?;
+  ensure_scripts_seed_at(&data_root)
 }
 
 fn resolve_script_config_path() -> Result<PathBuf, String> {
-  Ok(resolve_configs_dir()?.join("scripts_config.json"))
+  let (data_root, _) = resolve_active_data_root()?;
+  let path = data_root.join("scripts_config.json");
+  ensure_parent_dir(&path)?;
+  if !path.exists() {
+    let seeded = resolve_seed_source_configs_dir().and_then(|source| {
+      source_config_file(&source, &["scripts_configs.json", "scripts_config.json"])
+    });
+
+    if let Some(seed_path) = seeded {
+      std::fs::copy(seed_path, &path).map_err(|e| format!("初始化脚本配置失败: {e}"))?;
+    } else {
+      let body = serde_json::to_string_pretty(&ScriptConfigFile { scripts: Vec::new() })
+        .map_err(|e| format!("初始化脚本配置失败: {e}"))?;
+      std::fs::write(&path, body).map_err(|e| format!("写入脚本配置失败: {e}"))?;
+    }
+  }
+  Ok(path)
 }
 
 fn resolve_configs_dir() -> Result<PathBuf, String> {
-  let (data_root, _) = resolve_active_data_root()?;
-  let source_configs = resolve_seed_source_configs_dir();
-  ensure_configs_seed_at(&data_root, source_configs.as_deref())
+  ensure_settings_seed(resolve_seed_source_configs_dir().as_deref())
 }
 
 fn resolve_app_config_path() -> Result<PathBuf, String> {
@@ -362,6 +504,75 @@ fn ensure_logs_dir_at(data_root: &Path) -> Result<PathBuf, String> {
   let logs_dir = data_root.join("logs");
   std::fs::create_dir_all(&logs_dir).map_err(|e| format!("创建运行时 logs 目录失败: {e}"))?;
   Ok(logs_dir)
+}
+
+fn purge_tmp_entries_older_than(tmp_dir: &Path, max_age_days: u64) {
+  let now = std::time::SystemTime::now();
+  let max_age_secs = max_age_days.saturating_mul(24 * 60 * 60);
+  let cutoff = now
+    .checked_sub(std::time::Duration::from_secs(max_age_secs))
+    .unwrap_or(now);
+
+  fn walk(dir: &Path, cutoff: std::time::SystemTime) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+      return;
+    };
+
+    for entry in entries.flatten() {
+      let path = entry.path();
+      if path.is_dir() {
+        walk(&path, cutoff);
+        let _ = std::fs::remove_dir(&path);
+        continue;
+      }
+
+      let stale = entry
+        .metadata()
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .map(|modified| modified < cutoff)
+        .unwrap_or(false);
+      if stale {
+        let _ = std::fs::remove_file(&path);
+      }
+    }
+  }
+
+  walk(tmp_dir, cutoff);
+}
+
+fn ensure_tmp_dir_at(data_root: &Path) -> Result<PathBuf, String> {
+  let tmp_dir = data_root.join("tmp");
+  std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建运行时 tmp 目录失败: {e}"))?;
+  purge_tmp_entries_older_than(&tmp_dir, 7);
+  Ok(tmp_dir)
+}
+
+fn resolve_dev_template_tmp_dir() -> Option<PathBuf> {
+  let roots = workspace_candidate_roots().ok()?;
+  for root in roots {
+    let dev_configs = root.join("dev-configs");
+    if !dev_configs.exists() || !dev_configs.is_dir() {
+      continue;
+    }
+
+    let tmp_dir = dev_configs.join("tmp");
+    if std::fs::create_dir_all(&tmp_dir).is_ok() {
+      purge_tmp_entries_older_than(&tmp_dir, 7);
+      return Some(tmp_dir);
+    }
+  }
+
+  None
+}
+
+fn resolve_tmp_dir() -> Result<PathBuf, String> {
+  if let Some(dev_tmp_dir) = resolve_dev_template_tmp_dir() {
+    return Ok(dev_tmp_dir);
+  }
+
+  let (data_root, _) = resolve_active_data_root()?;
+  ensure_tmp_dir_at(&data_root)
 }
 
 fn resolve_logs_dir() -> Option<PathBuf> {
@@ -445,7 +656,7 @@ fn load_script_catalog_from_file() -> Result<Vec<ScriptMenuItem>, String> {
   let raw = std::fs::read_to_string(&config_path)
     .map_err(|e| format!("读取脚本配置失败: {e}"))?;
   let parsed: ScriptConfigFile =
-    serde_json::from_str(&raw).map_err(|e| format!("解析脚本配置失败: {e}"))?;
+    serde_json::from_str(strip_utf8_bom(&raw)).map_err(|e| format!("解析脚本配置失败: {e}"))?;
 
   let mut items = Vec::<ScriptMenuItem>::new();
   for item in parsed.scripts {
@@ -467,6 +678,75 @@ fn save_script_catalog(items: &[ScriptMenuItem]) -> Result<(), String> {
   .map_err(|e| format!("序列化脚本配置失败: {e}"))?;
   std::fs::write(&config_path, body).map_err(|e| format!("写入脚本配置失败: {e}"))
 }
+
+fn sync_script_catalog_with_scripts_dir() -> Result<Vec<ScriptMenuItem>, String> {
+  let scripts_dir = resolve_scripts_dir()?;
+  let config_path = resolve_script_config_path()?;
+
+  let mut catalog = if config_path.exists() {
+    load_script_catalog_from_file().unwrap_or_default()
+  } else {
+    Vec::new()
+  };
+
+  let mut file_names = Vec::<String>::new();
+  let entries = std::fs::read_dir(&scripts_dir).map_err(|e| format!("读取脚本目录失败: {e}"))?;
+  for entry in entries {
+    let entry = entry.map_err(|e| format!("读取脚本目录项失败: {e}"))?;
+    let path = entry.path();
+    if !path.is_file() {
+      continue;
+    }
+    if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+      let script_name = name.trim().to_string();
+      if !script_name.is_empty() {
+        file_names.push(script_name);
+      }
+    }
+  }
+
+  file_names.sort();
+  file_names.dedup();
+  let existing: HashSet<String> = file_names.iter().cloned().collect();
+
+  catalog.retain(|item| {
+    let script = item.script.trim();
+    let label = item.label.trim();
+    !script.is_empty() && !label.is_empty() && existing.contains(script)
+  });
+
+  let known: HashSet<String> = catalog.iter().map(|item| item.script.clone()).collect();
+  for name in &file_names {
+    if !known.contains(name) {
+      catalog.push(ScriptMenuItem {
+        label: name.clone(),
+        script: name.clone(),
+      });
+    }
+  }
+
+  catalog.sort_by(|a, b| a.script.to_lowercase().cmp(&b.script.to_lowercase()));
+  save_script_catalog(&catalog)?;
+  Ok(catalog)
+}
+
+#[cfg(target_os = "windows")]
+fn refresh_context_menu_if_enabled() {
+  if let Ok(config) = load_or_init_app_config() {
+    if !config.system_integration.context_menu_enabled {
+      return;
+    }
+
+    if let Err(err) = apply_context_menu(true) {
+      write_log("ERROR", &format!("context menu refresh failed: {err}"));
+    } else {
+      write_log("INFO", "context menu refreshed from script catalog");
+    }
+  }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn refresh_context_menu_if_enabled() {}
 
 fn ensure_safe_script_name(script_name: &str) -> Result<(), String> {
   let name = script_name.trim();
@@ -520,9 +800,8 @@ fn script_template(script_name: &str) -> String {
 }
 
 fn configured_env_value(env_name: &str) -> Option<String> {
-  if let Ok(config) = load_or_init_app_config() {
-    if let Some(found) = config
-      .environments
+  if let Ok(environments) = load_or_init_env_config() {
+    if let Some(found) = environments
       .iter()
       .find(|item| item.name.trim().eq_ignore_ascii_case(env_name))
     {
@@ -872,7 +1151,16 @@ fn load_or_init_app_config() -> Result<AppConfigFile, String> {
 
   let raw = std::fs::read_to_string(&config_path)
     .map_err(|e| format!("读取应用配置失败: {e}"))?;
-  serde_json::from_str::<AppConfigFile>(&raw).map_err(|e| format!("解析应用配置失败: {e}"))
+  let mut parsed = serde_json::from_str::<AppConfigFile>(strip_utf8_bom(&raw))
+    .map_err(|e| format!("解析应用配置失败: {e}"))?;
+
+  if parsed.system_integration.user_data_path.trim().is_empty() {
+    let (data_root, _) = resolve_active_data_root()?;
+    parsed.system_integration.user_data_path = data_root.to_string_lossy().to_string();
+    save_app_config(&parsed)?;
+  }
+
+  Ok(parsed)
 }
 
 fn save_app_config(config: &AppConfigFile) -> Result<(), String> {
@@ -880,6 +1168,79 @@ fn save_app_config(config: &AppConfigFile) -> Result<(), String> {
   let body =
     serde_json::to_string_pretty(config).map_err(|e| format!("序列化应用配置失败: {e}"))?;
   std::fs::write(&config_path, body).map_err(|e| format!("写入应用配置失败: {e}"))
+}
+
+fn ensure_env_config_at(
+  data_root: &Path,
+  source_configs: Option<&Path>,
+) -> Result<Vec<EnvironmentConfig>, String> {
+  let env_path = data_root.join("env_config.json");
+  ensure_parent_dir(&env_path)?;
+
+  if !env_path.exists() {
+    if let Some(source_configs) = source_configs {
+      if let Some(source_env) = source_config_file(source_configs, &["env_configs.json", "env_config.json"]) {
+        std::fs::copy(&source_env, &env_path)
+          .map_err(|e| format!("初始化 env_config.json 失败: {e}"))?;
+      }
+    }
+
+    if env_path.exists() {
+      let raw = std::fs::read_to_string(&env_path)
+        .map_err(|e| format!("读取环境配置失败: {e}"))?;
+      let parsed = serde_json::from_str::<EnvConfigFile>(&raw)
+        .map_err(|e| format!("解析环境配置失败: {e}"))?;
+      if !parsed.environments.is_empty() {
+        return Ok(parsed.environments);
+      }
+    }
+
+    let app_config = load_or_init_app_config()?;
+    let seed = if app_config.legacy_environments.is_empty() {
+      default_environments()
+    } else {
+      app_config.legacy_environments.clone()
+    };
+    let body = serde_json::to_string_pretty(&EnvConfigFile {
+      environments: seed.clone(),
+    })
+    .map_err(|e| format!("序列化环境配置失败: {e}"))?;
+    std::fs::write(&env_path, body).map_err(|e| format!("写入环境配置失败: {e}"))?;
+    return Ok(seed);
+  }
+
+  let raw = std::fs::read_to_string(&env_path)
+    .map_err(|e| format!("读取环境配置失败: {e}"))?;
+  let parsed = serde_json::from_str::<EnvConfigFile>(strip_utf8_bom(&raw))
+    .map_err(|e| format!("解析环境配置失败: {e}"))?;
+
+  if parsed.environments.is_empty() {
+    let defaults = default_environments();
+    let body = serde_json::to_string_pretty(&EnvConfigFile {
+      environments: defaults.clone(),
+    })
+    .map_err(|e| format!("序列化环境配置失败: {e}"))?;
+    std::fs::write(&env_path, body).map_err(|e| format!("写入环境配置失败: {e}"))?;
+    return Ok(defaults);
+  }
+
+  Ok(parsed.environments)
+}
+
+fn load_or_init_env_config() -> Result<Vec<EnvironmentConfig>, String> {
+  let (data_root, _) = resolve_active_data_root()?;
+  ensure_env_config_at(&data_root, resolve_seed_source_configs_dir().as_deref())
+}
+
+fn save_env_config(environments: &[EnvironmentConfig]) -> Result<(), String> {
+  let (data_root, _) = resolve_active_data_root()?;
+  let env_path = data_root.join("env_config.json");
+  ensure_parent_dir(&env_path)?;
+  let body = serde_json::to_string_pretty(&EnvConfigFile {
+    environments: environments.to_vec(),
+  })
+  .map_err(|e| format!("序列化环境配置失败: {e}"))?;
+  std::fs::write(&env_path, body).map_err(|e| format!("写入环境配置失败: {e}"))
 }
 
 #[cfg(target_os = "windows")]
@@ -1114,7 +1475,9 @@ fn take_startup_job(state: tauri::State<AppState>) -> Option<StartupJob> {
 
 #[tauri::command]
 fn get_script_catalog() -> Result<Vec<ScriptMenuItem>, String> {
-  load_script_catalog_from_file()
+  let catalog = sync_script_catalog_with_scripts_dir()?;
+  refresh_context_menu_if_enabled();
+  Ok(catalog)
 }
 
 #[tauri::command]
@@ -1128,7 +1491,7 @@ fn create_script_item(label: String, script_name: String) -> Result<Vec<ScriptMe
     label.trim().to_string()
   };
 
-  let mut catalog = load_script_catalog_from_file()?;
+  let mut catalog = sync_script_catalog_with_scripts_dir()?;
   if catalog.iter().any(|item| item.script == script_name) {
     return Err(format!("脚本已存在: {script_name}"));
   }
@@ -1148,6 +1511,7 @@ fn create_script_item(label: String, script_name: String) -> Result<Vec<ScriptMe
     script: script_name,
   });
   save_script_catalog(&catalog)?;
+  refresh_context_menu_if_enabled();
   open_path_in_default_editor(&script_path)?;
 
   Ok(catalog)
@@ -1165,7 +1529,7 @@ fn delete_script_item(script_name: String) -> Result<Vec<ScriptMenuItem>, String
   ensure_safe_script_name(&script_name)?;
   let script_name = script_name.trim().to_string();
 
-  let mut catalog = load_script_catalog_from_file()?;
+  let mut catalog = sync_script_catalog_with_scripts_dir()?;
   let old_len = catalog.len();
   catalog.retain(|item| item.script != script_name);
   if catalog.len() == old_len {
@@ -1180,20 +1544,26 @@ fn delete_script_item(script_name: String) -> Result<Vec<ScriptMenuItem>, String
     std::fs::remove_file(&script_path).map_err(|e| format!("删除脚本文件失败: {e}"))?;
   }
 
+  refresh_context_menu_if_enabled();
   write_log("INFO", &format!("script deleted: {script_name}"));
   Ok(catalog)
 }
 
 #[tauri::command]
 fn get_system_integration_config() -> Result<SystemIntegrationConfig, String> {
-  let config = load_or_init_app_config()?;
+  let mut config = load_or_init_app_config()?;
+  let (data_root, _) = resolve_active_data_root()?;
+  let resolved = data_root.to_string_lossy().to_string();
+  if config.system_integration.user_data_path != resolved {
+    config.system_integration.user_data_path = resolved;
+    save_app_config(&config)?;
+  }
   Ok(config.system_integration)
 }
 
 #[tauri::command]
 fn get_environment_configs() -> Result<Vec<EnvironmentConfig>, String> {
-  let config = load_or_init_app_config()?;
-  Ok(config.environments)
+  load_or_init_env_config()
 }
 
 #[tauri::command]
@@ -1235,9 +1605,7 @@ fn set_environment_configs(environments: Vec<EnvironmentConfig>) -> Result<Vec<E
     return Err("环境配置不能为空".to_string());
   }
 
-  let mut config = load_or_init_app_config()?;
-  config.environments = cleaned.clone();
-  save_app_config(&config)?;
+  save_env_config(&cleaned)?;
 
   write_log("INFO", &format!("environments saved ({} entries)", cleaned.len()));
   Ok(cleaned)
@@ -1245,8 +1613,11 @@ fn set_environment_configs(environments: Vec<EnvironmentConfig>) -> Result<Vec<E
 
 fn data_directory_info() -> Result<DataDirectoryInfo, String> {
   let (data_root, using_default) = resolve_active_data_root()?;
-  let configs_dir = ensure_configs_seed_at(&data_root, resolve_seed_source_configs_dir().as_deref())?;
+  let configs_dir = resolve_configs_dir()?;
+  let _ = ensure_scripts_seed_at(&data_root)?;
+  let _ = load_or_init_env_config()?;
   let logs_dir = ensure_logs_dir_at(&data_root)?;
+  let _ = ensure_tmp_dir_at(&data_root)?;
   Ok(DataDirectoryInfo {
     data_root: data_root.to_string_lossy().to_string(),
     configs_dir: configs_dir.to_string_lossy().to_string(),
@@ -1265,37 +1636,61 @@ fn set_data_directory_root(data_root: String) -> Result<DataDirectoryInfo, Strin
   let trimmed = data_root.trim();
   let (old_root, _) = resolve_active_data_root()?;
 
-  if trimmed.is_empty() {
-    write_data_root_override(None)?;
-    let info = data_directory_info()?;
-    write_log("INFO", "data directory reset to default location");
-    return Ok(info);
-  }
+  let (new_root, use_default_root) = if trimmed.is_empty() {
+    (local_data_root()?, true)
+  } else {
+    let mut resolved = PathBuf::from(trimmed);
+    if !resolved.is_absolute() {
+      let cwd = std::env::current_dir().map_err(|e| format!("读取当前目录失败: {e}"))?;
+      resolved = cwd.join(resolved);
+    }
+    (resolved, false)
+  };
 
-  let mut new_root = PathBuf::from(trimmed);
-  if !new_root.is_absolute() {
-    let cwd = std::env::current_dir().map_err(|e| format!("读取当前目录失败: {e}"))?;
-    new_root = cwd.join(new_root);
-  }
   std::fs::create_dir_all(&new_root).map_err(|e| format!("创建数据目录失败: {e}"))?;
 
-  write_data_root_override(Some(&new_root))?;
-
-  let new_configs = ensure_configs_seed_at(&new_root, resolve_seed_source_configs_dir().as_deref())?;
-  let new_logs = ensure_logs_dir_at(&new_root)?;
-
-  let old_configs = old_root.join("configs");
-  if old_root != new_root && old_configs.exists() && old_configs.is_dir() {
-    let _ = copy_dir_recursive(&old_configs, &new_configs);
+  let old_scripts = old_root.join("scripts");
+  let new_scripts = new_root.join("scripts");
+  if old_root != new_root && old_scripts.exists() && old_scripts.is_dir() {
+    let _ = copy_dir_recursive(&old_scripts, &new_scripts);
   }
 
   let old_logs = old_root.join("logs");
+  let new_logs = new_root.join("logs");
   if old_root != new_root && old_logs.exists() && old_logs.is_dir() {
     let _ = copy_dir_recursive(&old_logs, &new_logs);
   }
 
+  let old_env_config = old_root.join("env_config.json");
+  let new_env_config = new_root.join("env_config.json");
+  if old_root != new_root && old_env_config.exists() && !new_env_config.exists() {
+    let _ = std::fs::copy(&old_env_config, &new_env_config);
+  }
+
+  let _ = ensure_scripts_seed_at(&new_root)?;
+  let _ = ensure_env_config_at(&new_root, resolve_seed_source_configs_dir().as_deref())?;
+  let _ = ensure_logs_dir_at(&new_root)?;
+  let _ = ensure_tmp_dir_at(&new_root)?;
+
+  if use_default_root {
+    write_data_root_override(None)?;
+  } else {
+    write_data_root_override(Some(&new_root))?;
+  }
+
+  let mut app_config = load_or_init_app_config()?;
+  app_config.system_integration.user_data_path = new_root.to_string_lossy().to_string();
+  save_app_config(&app_config)?;
+
   let info = data_directory_info()?;
-  write_log("INFO", &format!("data directory set: {}", info.data_root));
+  write_log(
+    "INFO",
+    &format!(
+      "data directory set: {}{}",
+      info.data_root,
+      if info.using_default { " (default)" } else { "" }
+    ),
+  );
   Ok(info)
 }
 
@@ -1336,24 +1731,25 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_configs_folder() -> Result<String, String> {
-  let configs_dir = resolve_configs_dir()?;
+fn open_user_data_folder() -> Result<String, String> {
+  let (data_root, _) = resolve_active_data_root()?;
+  std::fs::create_dir_all(&data_root).map_err(|e| format!("创建用户数据目录失败: {e}"))?;
 
   #[cfg(target_os = "windows")]
   {
     Command::new("explorer")
-      .arg(&configs_dir)
+      .arg(&data_root)
       .spawn()
-      .map_err(|e| format!("打开 configs 文件夹失败: {e}"))?;
+      .map_err(|e| format!("打开用户数据目录失败: {e}"))?;
 
-    let path = configs_dir.to_string_lossy().to_string();
-    write_log("INFO", &format!("configs folder opened: {path}"));
+    let path = data_root.to_string_lossy().to_string();
+    write_log("INFO", &format!("data root folder opened: {path}"));
     return Ok(path);
   }
 
   #[cfg(not(target_os = "windows"))]
   {
-    Err("当前平台暂不支持打开 configs 文件夹".to_string())
+    Err("当前平台暂不支持打开用户数据目录".to_string())
   }
 }
 
@@ -1429,6 +1825,7 @@ fn set_system_integration_config(
   let integration = SystemIntegrationConfig {
     auto_start_enabled,
     context_menu_enabled,
+    user_data_path: resolve_active_data_root()?.0.to_string_lossy().to_string(),
   };
   let mut config = load_or_init_app_config()?;
   config.system_integration = integration.clone();
@@ -1489,7 +1886,7 @@ fn run_demo_script(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-      let compile_dir = std::env::temp_dir().join(format!("omniisle_java_{}", now));
+      let compile_dir = resolve_tmp_dir()?.join(format!("omniisle_java_{}", now));
       std::fs::create_dir_all(&compile_dir)
         .map_err(|e| format!("创建 Java 编译目录失败: {e}"))?;
       let source_path = compile_dir.join(format!("{}.java", simple_class_name));
@@ -1542,7 +1939,7 @@ fn run_demo_script(
       } else {
         format!("omniisle_{}_{}", stem, now)
       };
-      let binary_path = std::env::temp_dir().join(binary_name);
+      let binary_path = resolve_tmp_dir()?.join(binary_name);
 
       let mut compile = Command::new(&compiler);
       apply_mingw_toolchain_env(&mut compile);
@@ -1798,7 +2195,7 @@ pub fn run() {
       pick_data_directory,
       pick_environment_executable,
       open_url,
-      open_configs_folder,
+      open_user_data_folder,
       open_logs_folder,
       write_app_log,
       take_startup_job,
@@ -1807,6 +2204,19 @@ pub fn run() {
     .setup(|app| {
       if let Some(main_window) = app.get_webview_window("main") {
         place_window_on_cursor_monitor_top_center(&main_window);
+      }
+
+      #[cfg(target_os = "windows")]
+      {
+        if let Ok(config) = load_or_init_app_config() {
+          if config.system_integration.context_menu_enabled {
+            if let Err(err) = apply_context_menu(true) {
+              write_log("ERROR", &format!("context menu refresh on startup failed: {err}"));
+            } else {
+              write_log("INFO", "context menu refreshed on startup");
+            }
+          }
+        }
       }
 
       if let Some(state) = app.try_state::<AppState>() {
