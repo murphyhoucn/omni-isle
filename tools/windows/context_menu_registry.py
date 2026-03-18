@@ -140,7 +140,12 @@ def uninstall_context_menu_entries() -> None:
 
 
 def _default_exe_path(repo_root: Path) -> Path:
-    return repo_root / "omniisle-tauri" / "src-tauri" / "target" / "release" / "app.exe"
+    release_dir = repo_root / "omniisle-tauri" / "src-tauri" / "target" / "release"
+    for candidate in ("OmniIsle.exe", "omniisle.exe", "app.exe"):
+        exe = release_dir / candidate
+        if exe.exists():
+            return exe
+    return release_dir / "OmniIsle.exe"
 
 
 def main() -> int:

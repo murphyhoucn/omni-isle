@@ -19,6 +19,7 @@ __pycache__/
 *.pyd
 
 *.exe
+*.msi
 task_*.*
 
 # Node / frontend

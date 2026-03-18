@@ -7,7 +7,7 @@ import './App.css'
 
 const EXPANDED_WIDTH = 650
 const COLLAPSED_WIDTH = 300
-const APP_VERSION = '0.1.0-demo'
+const APP_VERSION = '0.1.0'
 const APP_AUTHOR = 'Murphy Hou'
 const GITHUB_REPO_URL = 'https://github.com/murphyhoucn/omni-isle'
 const DEBUG_BODY_BOUNDS = false // 调试用，是否显示主窗口边界框
@@ -117,7 +117,7 @@ function App() {
   const [runState, setRunState] = useState<RunState>('ready')
   const [windowVisible, setWindowVisible] = useState(true)
   const [logs, setLogs] = useState<LogEntry[]>([ // 日志列表
-    { id: 1, level: 'info', text: 'OmniIsle island online', at: nowStamp() },
+    { id: 1, level: 'info', text: 'OmniIsle online', at: nowStamp() },
   ])
   const [scriptItems, setScriptItems] = useState<ScriptMenuItem[]>([]) // 脚本项目列表
   const [busy, setBusy] = useState(false) // 是否忙碌状态

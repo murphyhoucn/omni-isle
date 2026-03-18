@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -26,6 +28,9 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Serialize)]
 struct ScriptRunResult {
@@ -1054,6 +1059,9 @@ fn run_command_with_stream(
   mut command: Command,
   launch_error_prefix: &str,
 ) -> Result<ScriptRunResult, String> {
+  #[cfg(target_os = "windows")]
+  command.creation_flags(CREATE_NO_WINDOW);
+
   let mut child = command
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped())
@@ -1281,8 +1289,12 @@ fn apply_auto_start(enabled: bool) -> Result<(), String> {
     run_key
       .set_value("OmniIsle", &value)
       .map_err(|e| format!("写入开机启动失败: {e}"))?;
+    let _ = run_key.delete_value("app");
+    let _ = run_key.delete_value("omniisle-tauri");
   } else {
     let _ = run_key.delete_value("OmniIsle");
+    let _ = run_key.delete_value("app");
+    let _ = run_key.delete_value("omniisle-tauri");
   }
 
   Ok(())
@@ -1835,9 +1847,8 @@ fn set_system_integration_config(
   Ok(integration)
 }
 
-#[tauri::command]
-fn run_demo_script(
-  window: tauri::Window,
+fn run_demo_script_blocking(
+  window: &tauri::Window,
   script_name: String,
   target_path: Option<String>,
 ) -> Result<ScriptRunResult, String> {
@@ -1961,6 +1972,19 @@ fn run_demo_script(
     }
     _ => Err(format!("不支持的脚本类型: {}", script_name)),
   }
+}
+
+#[tauri::command]
+async fn run_demo_script(
+  window: tauri::Window,
+  script_name: String,
+  target_path: Option<String>,
+) -> Result<ScriptRunResult, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    run_demo_script_blocking(&window, script_name, target_path)
+  })
+  .await
+  .map_err(|e| format!("脚本执行任务失败: {e}"))?
 }
 
 #[tauri::command]
