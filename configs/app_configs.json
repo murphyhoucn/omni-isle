@@ -1,6 +1,6 @@
 {
   "system_integration": {
-    "auto_start_enabled": true,
+    "auto_start_enabled": false,
     "context_menu_enabled": true
   },
   "environments": [

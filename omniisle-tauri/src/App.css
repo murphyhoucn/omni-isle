@@ -447,16 +447,9 @@ div.log-box::-webkit-scrollbar-corner {
 
 .settings-top {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 12px;
-}
-
-.settings-top-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .settings-top h1 {
@@ -596,6 +589,52 @@ div.log-box::-webkit-scrollbar-corner {
 .idle-hide-select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.data-dir-row {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.data-dir-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.data-dir-title-wrap p {
+  margin: 6px 0 0;
+}
+
+.data-dir-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.data-dir-input {
+  height: 32px;
+  width: 100%;
+  max-width: 560px;
+  border-radius: 9px;
+  border: 1px solid rgba(187, 222, 244, 0.08);
+  background: rgba(8, 18, 28, 0.88);
+  color: #d2e5f3;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.data-dir-input::placeholder {
+  color: rgba(170, 194, 211, 0.6);
+}
+
+.data-dir-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .env-config-list {

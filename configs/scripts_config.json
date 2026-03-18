@@ -11,6 +11,10 @@
     {
       "label": "图片加水印",
       "script": "watermark.py"
+    },
+    {
+      "label": "Hello World",
+      "script": "helloword.py"
     }
   ]
 }

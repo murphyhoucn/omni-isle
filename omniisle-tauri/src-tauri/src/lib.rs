@@ -85,6 +85,14 @@ struct ScriptLogEvent {
   line: String,
 }
 
+#[derive(Serialize, Clone)]
+struct DataDirectoryInfo {
+  data_root: String,
+  configs_dir: String,
+  logs_dir: String,
+  using_default: bool,
+}
+
 fn default_system_integration() -> SystemIntegrationConfig {
   SystemIntegrationConfig {
     auto_start_enabled: false,
@@ -211,6 +219,43 @@ fn local_data_root() -> Result<PathBuf, String> {
   }
 }
 
+fn data_root_pointer_path() -> Result<PathBuf, String> {
+  Ok(local_data_root()?.join("data_root.txt"))
+}
+
+fn read_data_root_override() -> Option<PathBuf> {
+  let pointer = data_root_pointer_path().ok()?;
+  let raw = std::fs::read_to_string(pointer).ok()?;
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return None;
+  }
+  Some(PathBuf::from(trimmed))
+}
+
+fn write_data_root_override(path: Option<&Path>) -> Result<(), String> {
+  let pointer = data_root_pointer_path()?;
+  ensure_parent_dir(&pointer)?;
+  match path {
+    Some(value) => {
+      std::fs::write(&pointer, value.to_string_lossy().to_string())
+        .map_err(|e| format!("写入数据目录配置失败: {e}"))?;
+    }
+    None => {
+      let _ = std::fs::remove_file(&pointer);
+    }
+  }
+  Ok(())
+}
+
+fn resolve_active_data_root() -> Result<(PathBuf, bool), String> {
+  let default_root = local_data_root()?;
+  if let Some(override_root) = read_data_root_override() {
+    return Ok((override_root, false));
+  }
+  Ok((default_root, true))
+}
+
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
   if let Some(parent) = path.parent() {
     std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
@@ -241,24 +286,45 @@ fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
   Ok(())
 }
 
-fn ensure_runtime_configs_seed(source_configs: Option<&Path>) -> Result<PathBuf, String> {
-  let runtime_root = local_data_root()?;
-  let runtime_configs = runtime_root.join("configs");
+fn resolve_seed_source_configs_dir() -> Option<PathBuf> {
+  if let Ok(workspace_roots) = workspace_candidate_roots() {
+    if let Some(configs) = first_existing_configs_dir(&workspace_roots) {
+      return Some(configs);
+    }
+  }
+
+  if let Ok(exe_roots) = executable_candidate_roots() {
+    return first_existing_resource_configs_dir(&exe_roots)
+      .or_else(|| first_existing_configs_dir(&exe_roots));
+  }
+
+  None
+}
+
+fn ensure_configs_seed_at(data_root: &Path, source_configs: Option<&Path>) -> Result<PathBuf, String> {
+  let runtime_configs = data_root.join("configs");
   let runtime_scripts = runtime_configs.join("scripts");
   std::fs::create_dir_all(&runtime_scripts).map_err(|e| format!("创建运行时配置目录失败: {e}"))?;
 
   if let Some(source_configs) = source_configs {
-    let source_scripts = source_configs.join("scripts");
-    if !runtime_configs.join("app_configs.json").exists() && source_configs.join("app_configs.json").exists() {
-      std::fs::copy(source_configs.join("app_configs.json"), runtime_configs.join("app_configs.json"))
-        .map_err(|e| format!("初始化 app_configs.json 失败: {e}"))?;
-    }
-    if !runtime_configs.join("scripts_config.json").exists() && source_configs.join("scripts_config.json").exists() {
-      std::fs::copy(source_configs.join("scripts_config.json"), runtime_configs.join("scripts_config.json"))
-        .map_err(|e| format!("初始化 scripts_config.json 失败: {e}"))?;
-    }
-    if source_scripts.exists() && source_scripts.is_dir() {
-      copy_dir_recursive(&source_scripts, &runtime_scripts)?;
+    let source_canonical = source_configs.canonicalize().ok();
+    let target_canonical = runtime_configs.canonicalize().ok();
+    let same_root = source_configs == runtime_configs
+      || (source_canonical.is_some() && source_canonical == target_canonical);
+
+    if !same_root {
+      let source_scripts = source_configs.join("scripts");
+      if !runtime_configs.join("app_configs.json").exists() && source_configs.join("app_configs.json").exists() {
+        std::fs::copy(source_configs.join("app_configs.json"), runtime_configs.join("app_configs.json"))
+          .map_err(|e| format!("初始化 app_configs.json 失败: {e}"))?;
+      }
+      if !runtime_configs.join("scripts_config.json").exists() && source_configs.join("scripts_config.json").exists() {
+        std::fs::copy(source_configs.join("scripts_config.json"), runtime_configs.join("scripts_config.json"))
+          .map_err(|e| format!("初始化 scripts_config.json 失败: {e}"))?;
+      }
+      if source_scripts.exists() && source_scripts.is_dir() {
+        copy_dir_recursive(&source_scripts, &runtime_scripts)?;
+      }
     }
   }
 
@@ -281,16 +347,9 @@ fn resolve_script_config_path() -> Result<PathBuf, String> {
 }
 
 fn resolve_configs_dir() -> Result<PathBuf, String> {
-  let workspace_roots = workspace_candidate_roots()?;
-  if let Some(configs) = first_existing_configs_dir(&workspace_roots) {
-    return Ok(configs);
-  }
-
-  let exe_roots = executable_candidate_roots()?;
-  let source_configs = first_existing_resource_configs_dir(&exe_roots)
-    .or_else(|| first_existing_configs_dir(&exe_roots));
-
-  ensure_runtime_configs_seed(source_configs.as_deref())
+  let (data_root, _) = resolve_active_data_root()?;
+  let source_configs = resolve_seed_source_configs_dir();
+  ensure_configs_seed_at(&data_root, source_configs.as_deref())
 }
 
 fn resolve_app_config_path() -> Result<PathBuf, String> {
@@ -299,32 +358,20 @@ fn resolve_app_config_path() -> Result<PathBuf, String> {
 
 // ─── Daily-rolling log ───────────────────────────────────────────────────
 
-fn ensure_workspace_logs_dir() -> Result<Option<PathBuf>, String> {
-  let workspace_roots = workspace_candidate_roots()?;
-  if let Some(configs_dir) = first_existing_configs_dir(&workspace_roots) {
-    let root = configs_dir
-      .parent()
-      .ok_or_else(|| "无法解析工作区根目录".to_string())?;
-    let logs_dir = root.join("logs");
-    std::fs::create_dir_all(&logs_dir).map_err(|e| format!("创建 logs 目录失败: {e}"))?;
-    return Ok(Some(logs_dir));
-  }
-
-  Ok(None)
-}
-
-fn ensure_runtime_logs_dir() -> Result<PathBuf, String> {
-  let logs_dir = local_data_root()?.join("logs");
+fn ensure_logs_dir_at(data_root: &Path) -> Result<PathBuf, String> {
+  let logs_dir = data_root.join("logs");
   std::fs::create_dir_all(&logs_dir).map_err(|e| format!("创建运行时 logs 目录失败: {e}"))?;
   Ok(logs_dir)
 }
 
 fn resolve_logs_dir() -> Option<PathBuf> {
-  if let Ok(Some(logs_dir)) = ensure_workspace_logs_dir() {
-    return Some(logs_dir);
+  if let Ok((data_root, _)) = resolve_active_data_root() {
+    if let Ok(logs_dir) = ensure_logs_dir_at(&data_root) {
+      return Some(logs_dir);
+    }
   }
 
-  ensure_runtime_logs_dir().ok()
+  None
 }
 
 // Returns (YYYY-MM-DD, HH:MM:SS) using the local wall-clock time.
@@ -1196,6 +1243,76 @@ fn set_environment_configs(environments: Vec<EnvironmentConfig>) -> Result<Vec<E
   Ok(cleaned)
 }
 
+fn data_directory_info() -> Result<DataDirectoryInfo, String> {
+  let (data_root, using_default) = resolve_active_data_root()?;
+  let configs_dir = ensure_configs_seed_at(&data_root, resolve_seed_source_configs_dir().as_deref())?;
+  let logs_dir = ensure_logs_dir_at(&data_root)?;
+  Ok(DataDirectoryInfo {
+    data_root: data_root.to_string_lossy().to_string(),
+    configs_dir: configs_dir.to_string_lossy().to_string(),
+    logs_dir: logs_dir.to_string_lossy().to_string(),
+    using_default,
+  })
+}
+
+#[tauri::command]
+fn get_data_directory_info() -> Result<DataDirectoryInfo, String> {
+  data_directory_info()
+}
+
+#[tauri::command]
+fn set_data_directory_root(data_root: String) -> Result<DataDirectoryInfo, String> {
+  let trimmed = data_root.trim();
+  let (old_root, _) = resolve_active_data_root()?;
+
+  if trimmed.is_empty() {
+    write_data_root_override(None)?;
+    let info = data_directory_info()?;
+    write_log("INFO", "data directory reset to default location");
+    return Ok(info);
+  }
+
+  let mut new_root = PathBuf::from(trimmed);
+  if !new_root.is_absolute() {
+    let cwd = std::env::current_dir().map_err(|e| format!("读取当前目录失败: {e}"))?;
+    new_root = cwd.join(new_root);
+  }
+  std::fs::create_dir_all(&new_root).map_err(|e| format!("创建数据目录失败: {e}"))?;
+
+  write_data_root_override(Some(&new_root))?;
+
+  let new_configs = ensure_configs_seed_at(&new_root, resolve_seed_source_configs_dir().as_deref())?;
+  let new_logs = ensure_logs_dir_at(&new_root)?;
+
+  let old_configs = old_root.join("configs");
+  if old_root != new_root && old_configs.exists() && old_configs.is_dir() {
+    let _ = copy_dir_recursive(&old_configs, &new_configs);
+  }
+
+  let old_logs = old_root.join("logs");
+  if old_root != new_root && old_logs.exists() && old_logs.is_dir() {
+    let _ = copy_dir_recursive(&old_logs, &new_logs);
+  }
+
+  let info = data_directory_info()?;
+  write_log("INFO", &format!("data directory set: {}", info.data_root));
+  Ok(info)
+}
+
+#[tauri::command]
+fn pick_data_directory() -> Result<Option<String>, String> {
+  #[cfg(target_os = "windows")]
+  {
+    let picked = rfd::FileDialog::new().pick_folder();
+    return Ok(picked.map(|path| path.to_string_lossy().to_string()));
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    Err("当前平台不支持该选择器".to_string())
+  }
+}
+
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
   let url = url.trim().to_string();
@@ -1676,6 +1793,9 @@ pub fn run() {
       set_environment_configs,
       get_idle_hide_seconds,
       set_idle_hide_seconds,
+      get_data_directory_info,
+      set_data_directory_root,
+      pick_data_directory,
       pick_environment_executable,
       open_url,
       open_configs_folder,

@@ -86,6 +86,13 @@ type EnvConfigPayload = {
   executable_path: string
 }
 
+type DataDirectoryInfo = {
+  data_root: string
+  configs_dir: string
+  logs_dir: string
+  using_default: boolean
+}
+
 const nowStamp = () =>
   new Date().toLocaleTimeString('zh-CN', {
     hour12: false,
@@ -122,9 +129,12 @@ function App() {
   const [savingSystemIntegration, setSavingSystemIntegration] = useState(false) // 是否正在保存系统集成设置
   const [savingEnvConfigs, setSavingEnvConfigs] = useState(false) // 是否正在保存环境配置
   const [savingIdleHide, setSavingIdleHide] = useState(false) // 是否正在保存自动隐藏设置
+  const [savingDataDirectory, setSavingDataDirectory] = useState(false) // 是否正在保存数据目录
   const [openingConfigs, setOpeningConfigs] = useState(false) // 是否正在打开 configs 文件夹
   const [openingLogs, setOpeningLogs] = useState(false) // 是否正在打开 logs 文件夹
+  const [pickingDataDirectory, setPickingDataDirectory] = useState(false) // 是否正在选择数据目录
   const [idleHideSeconds, setIdleHideSeconds] = useState(60) // 自动隐藏秒数，0=永不隐藏
+  const [dataDirectoryInput, setDataDirectoryInput] = useState('') // 数据目录输入值
   const [pickingEnvRowId, setPickingEnvRowId] = useState<number | null>(null) // 正在选择的环境配置ID
   const [editingScriptName, setEditingScriptName] = useState<string | null>(null) // 正在编辑的脚本名称
   const [actionFeedbackKey, setActionFeedbackKey] = useState<string | null>(null) // 操作反馈键
@@ -840,6 +850,47 @@ function App() {
     }
   }
 
+  const applyDataDirectoryInfo = (info: DataDirectoryInfo) => {
+    setDataDirectoryInput(info.data_root)
+  }
+
+  const saveDataDirectory = async (nextRoot: string) => {
+    setSavingDataDirectory(true)
+    try {
+      const saved = await invoke<DataDirectoryInfo>('set_data_directory_root', {
+        dataRoot: nextRoot,
+      })
+      applyDataDirectoryInfo(saved)
+      pushLog(
+        'success',
+        `数据目录已更新: ${saved.data_root}${saved.using_default ? '（默认）' : ''}`,
+      )
+    } catch (error) {
+      const errMsg = `保存数据目录失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setSavingDataDirectory(false)
+    }
+  }
+
+  const pickDataDirectory = async () => {
+    setPickingDataDirectory(true)
+    try {
+      const picked = await invoke<string | null>('pick_data_directory')
+      if (!picked) {
+        return
+      }
+      await saveDataDirectory(picked)
+    } catch (error) {
+      const errMsg = `打开数据目录选择器失败: ${String(error)}`
+      pushLog('error', errMsg)
+      logToFile('ERROR', errMsg)
+    } finally {
+      setPickingDataDirectory(false)
+    }
+  }
+
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -874,6 +925,15 @@ function App() {
         setIdleHideSeconds(seconds)
       } catch (error) {
         const errMsg = `读取自动隐藏设置失败: ${String(error)}`
+        pushLog('warn', errMsg)
+        logToFile('WARN', errMsg)
+      }
+
+      try {
+        const info = await invoke<DataDirectoryInfo>('get_data_directory_info')
+        applyDataDirectoryInfo(info)
+      } catch (error) {
+        const errMsg = `读取数据目录设置失败: ${String(error)}`
         pushLog('warn', errMsg)
         logToFile('WARN', errMsg)
       }
@@ -968,38 +1028,6 @@ function App() {
                           </svg>
                         </button>
                         <h1>OmniIsle 设置</h1>
-                        <div className="settings-top-actions">
-                          <button
-                            type="button"
-                            className="back-btn"
-                            onClick={() => void openConfigsFolder()}
-                            aria-label="打开 configs 文件夹"
-                            title="打开 configs 文件夹"
-                            disabled={openingConfigs}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path
-                                fill="currentColor"
-                                d="M22.7 19 13.6 9.9a5.5 5.5 0 0 0-1.5-6.8A5.5 5.5 0 0 0 5.4 1.5L9 5 6 8 2.5 4.5A5.5 5.5 0 0 0 4 11.2a5.5 5.5 0 0 0 6.8 1.5l9.1 9.1a1 1 0 0 0 1.4 0l1.4-1.4a1 1 0 0 0 0-1.4Z"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            className="back-btn"
-                            onClick={() => void openLogsFolder()}
-                            aria-label="打开 logs 文件夹"
-                            title="打开 logs 文件夹"
-                            disabled={openingLogs}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path
-                                fill="currentColor"
-                                d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-5-5Zm0 2.5L16.5 7H14V4.5ZM9 11h6a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm0 4h6a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z"
-                              />
-                            </svg>
-                          </button>
-                        </div>
                       </header>
 
                       <section className="settings-card panel-settings-card">
@@ -1055,6 +1083,93 @@ function App() {
                       </section>
 
                       <section className="settings-card panel-settings-card">
+                        <div className="data-dir-head">
+                          <div className="data-dir-title-wrap">
+                            <h2>应用数据目录</h2>
+                            <p>用于存放 configs 与 logs。默认路径在 AppData，可手动改到其他盘符。</p>
+                          </div>
+                          <div className="data-dir-head-actions">
+                            <button
+                              type="button"
+                              className={`script-icon-btn ${actionFeedbackKey === 'open-configs' ? 'is-pressed' : ''}`}
+                              aria-label="打开 configs 文件夹"
+                              title="打开 configs 文件夹"
+                              disabled={openingConfigs || savingDataDirectory || pickingDataDirectory}
+                              onClick={() => {
+                                flashActionFeedback('open-configs')
+                                void openConfigsFolder()
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path
+                                  fill="currentColor"
+                                  d="M22.7 19 13.6 9.9a5.5 5.5 0 0 0-1.5-6.8A5.5 5.5 0 0 0 5.4 1.5L9 5 6 8 2.5 4.5A5.5 5.5 0 0 0 4 11.2a5.5 5.5 0 0 0 6.8 1.5l9.1 9.1a1 1 0 0 0 1.4 0l1.4-1.4a1 1 0 0 0 0-1.4Z"
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              className={`script-icon-btn ${actionFeedbackKey === 'open-logs' ? 'is-pressed' : ''}`}
+                              aria-label="打开 logs 文件夹"
+                              title="打开 logs 文件夹"
+                              disabled={openingLogs || savingDataDirectory || pickingDataDirectory}
+                              onClick={() => {
+                                flashActionFeedback('open-logs')
+                                void openLogsFolder()
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path
+                                  fill="currentColor"
+                                  d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-5-5Zm0 2.5L16.5 7H14V4.5ZM9 11h6a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm0 4h6a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z"
+                                />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="data-dir-row">
+                          <input
+                            className="data-dir-input"
+                            type="text"
+                            value={dataDirectoryInput}
+                            placeholder="例如 D:/OmniIsleData"
+                            readOnly
+                            disabled={savingDataDirectory || pickingDataDirectory}
+                          />
+                          <button
+                            type="button"
+                            className="env-action-btn"
+                            aria-label="选择数据目录"
+                            title="选择目录"
+                            disabled={savingDataDirectory || pickingDataDirectory}
+                            onClick={() => void pickDataDirectory()}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path
+                                fill="currentColor"
+                                d="M10 4a2 2 0 0 1 1.4.6l1 1H19a2 2 0 0 1 2 2v8.5A2.5 2.5 0 0 1 18.5 18h-13A2.5 2.5 0 0 1 3 15.5v-9A2.5 2.5 0 0 1 5.5 4H10Zm0 2H5.5a.5.5 0 0 0-.5.5v9c0 .28.22.5.5.5h13a.5.5 0 0 0 .5-.5V8a.5.5 0 0 0-.5-.5h-6.93a2 2 0 0 1-1.4-.58L10 6Z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="env-action-btn env-action-btn-danger"
+                            aria-label="恢复默认数据目录"
+                            title="恢复默认目录"
+                            disabled={savingDataDirectory || pickingDataDirectory}
+                            onClick={() => void saveDataDirectory('')}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path
+                                fill="currentColor"
+                                d="M12 4a8 8 0 1 1-7.75 10h2.07A6 6 0 1 0 8 8.52V11H2V5h2v1.72A7.96 7.96 0 0 1 12 4Z"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </section>
+
+                      <section className="settings-card panel-settings-card">
                         <h2>运行环境</h2>
                         <p>每行一个运行环境，可新增更多环境并在系统中检索默认命令。</p>
                         <div className="env-config-list">
@@ -1077,16 +1192,9 @@ function App() {
                                 className="env-value-input"
                                 type="text"
                                 value={row.value}
-                                placeholder="在系统中检索到的可执行命令/路径"
+                                placeholder="请使用右侧搜索图标选择运行环境路径"
+                                readOnly
                                 disabled={savingEnvConfigs || pickingEnvRowId === row.id}
-                                onBlur={async (event) => {
-                                  await updateEnvConfigRow(row.id, { value: event.target.value })
-                                }}
-                                onChange={(event) => {
-                                  setEnvConfigs((prev) => prev.map((item) => (
-                                    item.id === row.id ? { ...item, value: event.target.value } : item
-                                  )))
-                                }}
                               />
                               <button
                                 type="button"
